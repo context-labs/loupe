@@ -7,7 +7,8 @@ import { createRootLogger, shutdownLogger } from "@loupe/logger";
 import { Command } from "commander";
 
 import { resolveProviders } from "./config";
-import { formatResult, reviewPullRequest } from "./run";
+import { loadReviewers } from "./reviewers";
+import { formatResult, renderReview, reviewPullRequest } from "./run";
 
 const REASONING: readonly ReasoningEffort[] = ["low", "medium", "high"];
 
@@ -87,6 +88,11 @@ program
     "-d, --dir <subdir>",
     "restrict review to a repo subdirectory (e.g. inference)",
   )
+  .option(
+    "--config <path>",
+    "reviewer-profiles config (.loupe.json) — runs each matching reviewer",
+  )
+  .option("--reviewer <name>", "run only this named reviewer from --config")
   .option("--dry-run", "compute and log the review without posting it", false)
   .option("--infisical-env <env>", "Infisical environment slug")
   .option("--infisical-project <id>", "Infisical project id")
@@ -103,6 +109,8 @@ program
         workdir: string;
         conventions: string;
         dir?: string;
+        config?: string;
+        reviewer?: string;
         dryRun: boolean;
         infisicalEnv?: string;
         infisicalProject?: string;
@@ -111,7 +119,7 @@ program
       const logger = createRootLogger("loupe-cli");
       try {
         const { owner, repo, pullNumber } = parsePr(pr);
-        const result = await reviewPullRequest({
+        const base = {
           token: resolveToken(opts.token),
           owner,
           repo,
@@ -128,6 +136,39 @@ program
           }),
           subdir: opts.dir,
           dryRun: opts.dryRun,
+        };
+
+        if (opts.config) {
+          let reviewers = loadReviewers(opts.config);
+          if (opts.reviewer) {
+            reviewers = reviewers.filter((r) => r.name === opts.reviewer);
+            if (reviewers.length === 0) {
+              throw new Error(`No reviewer named "${opts.reviewer}" in config`);
+            }
+          }
+          logger.info("Running reviewers", {
+            reviewers: reviewers.map((r) => r.name),
+          });
+          // Sequential: harnesses are heavy and may share rate limits.
+          for (const r of reviewers) {
+            const result = await reviewPullRequest({
+              ...base,
+              reviewerName: r.name,
+              guidance: r.guidance,
+              include: r.include,
+              exclude: r.exclude,
+              model: r.model ?? opts.model,
+              reasoning: parseReasoning(r.reasoning ?? opts.reasoning),
+              logger,
+            });
+            logger.info(`[${r.name}] ${formatResult(result)}`);
+            if (opts.dryRun) console.log(renderReview(result));
+          }
+          return;
+        }
+
+        const result = await reviewPullRequest({
+          ...base,
           model: opts.model,
           reasoning: parseReasoning(opts.reasoning),
           guidance: opts.promptFile
@@ -136,6 +177,7 @@ program
           logger,
         });
         logger.info(formatResult(result));
+        if (opts.dryRun) console.log(renderReview(result));
       } finally {
         await shutdownLogger();
       }

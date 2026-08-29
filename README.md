@@ -80,6 +80,45 @@ The system prompt has three layers. `--prompt-file` (CLI) / `prompt-file` input
 See `examples/loupe-prompt.md` for the shape — write only persona/priorities,
 never the JSON schema.
 
+## Focused reviewers (`.loupe.json`)
+
+Instead of one generic reviewer, define several focused ones — each with its own
+prompt, the file globs it applies to, and optional model/reasoning. loupe runs
+every reviewer whose globs match a changed file and posts each as its own
+labeled review (`🔍 loupe · migrations`). A reviewer whose globs match nothing is
+skipped, so the migration reviewer only fires when a migration changes.
+
+```json
+{
+  "reviewers": [
+    {
+      "name": "bugs",
+      "promptFile": "reviewers/bugs.md",
+      "include": ["**/*.ts", "**/*.tsx"],
+      "exclude": ["**/*.test.ts", "**/tests/**"],
+      "reasoning": "medium"
+    },
+    {
+      "name": "migrations",
+      "promptFile": "reviewers/migrations.md",
+      "include": ["**/migrations/**/*.sql", "**/migrations/**/migration.ts"],
+      "reasoning": "high"
+    }
+  ]
+}
+```
+
+Run all matching reviewers, or just one:
+
+```bash
+loupe review owner/repo#123 --config .loupe.json
+loupe review owner/repo#123 --config .loupe.json --reviewer migrations
+```
+
+In the Action, set `LOUPE_CONFIG` to the checked-out `.loupe.json` (promptFiles
+resolve relative to it). See `examples/.loupe.json` and `examples/reviewers/`
+for a ready bug-hunter + migration-risk pair.
+
 ## GitHub integration
 
 `action.yml` is a composite Action. Copy `.github/workflows/review.example.yml`

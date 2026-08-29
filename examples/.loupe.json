@@ -1,0 +1,21 @@
+{
+  "reviewers": [
+    {
+      "name": "bugs",
+      "promptFile": "reviewers/bugs.md",
+      "include": ["**/*.ts", "**/*.tsx"],
+      "exclude": ["**/*.test.ts", "**/tests/**"],
+      "reasoning": "medium"
+    },
+    {
+      "name": "migrations",
+      "promptFile": "reviewers/migrations.md",
+      "include": [
+        "**/migrations/**/*.sql",
+        "**/migrations/**/migration.ts",
+        "**/migrations/**/*.up.sql"
+      ],
+      "reasoning": "high"
+    }
+  ]
+}

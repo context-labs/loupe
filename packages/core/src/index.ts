@@ -12,6 +12,7 @@ import {
   type PullRef,
 } from "./github";
 import { parseReviewOutput } from "./parse";
+import type { Finding } from "./types";
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -49,6 +50,12 @@ export type ReviewRequest = {
   readonly reasoning: ReasoningEffort;
   /** Custom reviewer guidance replacing the default; contract is still appended. */
   readonly guidance?: string;
+  /** Named reviewer profile; labels the posted review (e.g. "migrations"). */
+  readonly reviewerName?: string;
+  /** Only review changed files matching these globs (in addition to subdir). */
+  readonly include?: readonly string[];
+  /** Exclude changed files matching these globs. */
+  readonly exclude?: readonly string[];
   readonly logger: Logger;
 };
 
@@ -56,6 +63,9 @@ export type ReviewResult = {
   readonly inlineCount: number;
   readonly droppedCount: number;
   readonly requestedChanges: boolean;
+  readonly summary: string;
+  readonly inline: readonly Finding[];
+  readonly dropped: readonly Finding[];
 };
 
 /** End-to-end: fetch PR + conventions, run the harness, post the review. */
@@ -68,6 +78,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   logger.info("Reviewing pull request", {
     repo: `${req.ref.owner}/${req.ref.repo}`,
     pull: req.ref.pull_number,
+    reviewer: req.reviewerName ?? "default",
     harness: req.harness.name,
     subdir: subdir ?? null,
   });
@@ -90,15 +101,27 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     });
   }
 
-  const files = subdir
-    ? pull.files.filter((f) => f.path.startsWith(prefix))
-    : pull.files;
+  const include = req.include?.map((g) => new Bun.Glob(g));
+  const exclude = req.exclude?.map((g) => new Bun.Glob(g));
+  const files = pull.files.filter((f) => {
+    if (subdir && !f.path.startsWith(prefix)) return false;
+    if (include && !include.some((g) => g.match(f.path))) return false;
+    if (exclude && exclude.some((g) => g.match(f.path))) return false;
+    return true;
+  });
 
   if (files.length === 0) {
     logger.info("No changed files in scope; nothing to review", {
       subdir: subdir ?? null,
     });
-    return { inlineCount: 0, droppedCount: 0, requestedChanges: false };
+    return {
+      inlineCount: 0,
+      droppedCount: 0,
+      requestedChanges: false,
+      summary: "No changed files in scope.",
+      inline: [],
+      dropped: [],
+    };
   }
 
   const systemPrompt = buildSystemPrompt({
@@ -149,33 +172,30 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
 
   const requestedChanges = inline.some((f) => f.severity === "blocker");
   const verdict = requestedChanges ? "REQUEST_CHANGES" : "COMMENT";
+  const result: ReviewResult = {
+    inlineCount: inline.length,
+    droppedCount: dropped.length,
+    requestedChanges,
+    summary: review.summary,
+    inline,
+    dropped,
+  };
 
   if (req.dryRun) {
     logger.info("Dry run — not posting review", {
-      summary: review.summary,
-      inline: inline.map(
-        (f) => `${f.path}:${f.line} [${f.severity}] ${f.body}`,
-      ),
-      dropped: dropped.length,
       verdict,
+      summary: review.summary,
     });
-    return {
-      inlineCount: inline.length,
-      droppedCount: dropped.length,
-      requestedChanges,
-    };
+    return result;
   }
 
-  await postReview(octokit, req.ref, review, inline, dropped);
+  await postReview(octokit, req.ref, review, inline, dropped, req.reviewerName);
   logger.info("Posted review", {
+    reviewer: req.reviewerName ?? "default",
     inline: inline.length,
     dropped: dropped.length,
     verdict,
   });
 
-  return {
-    inlineCount: inline.length,
-    droppedCount: dropped.length,
-    requestedChanges,
-  };
+  return result;
 }

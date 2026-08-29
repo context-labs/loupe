@@ -109,6 +109,7 @@ export async function postReview(
   review: ReviewOutput,
   inline: readonly Finding[],
   dropped: readonly Finding[],
+  reviewerName?: string,
 ): Promise<void> {
   const hasBlocker = inline.some((f) => f.severity === "blocker");
   const droppedNote =
@@ -116,11 +117,12 @@ export async function postReview(
       ? `\n\n**Additional notes (could not anchor to the diff):**\n` +
         dropped.map((f) => `- \`${f.path}:${f.line}\` — ${f.body}`).join("\n")
       : "";
+  const title = reviewerName ? `loupe · ${reviewerName}` : "loupe review";
 
   await octokit.pulls.createReview({
     ...ref,
     event: hasBlocker ? "REQUEST_CHANGES" : "COMMENT",
-    body: `🔍 **loupe review**\n\n${review.summary}${droppedNote}`,
+    body: `🔍 **${title}**\n\n${review.summary}${droppedNote}`,
     comments: inline.map((f) => ({
       path: f.path,
       line: f.line,

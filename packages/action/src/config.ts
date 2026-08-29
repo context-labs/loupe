@@ -30,6 +30,8 @@ const envSchema = z.object({
   LOUPE_INFISICAL_ENV: z.string().optional(),
   LOUPE_INFISICAL_PROJECT_ID: z.string().optional(),
   LOUPE_DIR: z.string().optional(),
+  LOUPE_CONFIG: z.string().optional(),
+  LOUPE_REVIEWER: z.string().optional(),
 });
 
 export type Config = {
@@ -45,6 +47,8 @@ export type Config = {
   readonly model: string;
   readonly reasoning: ReasoningEffort;
   readonly guidance?: string;
+  readonly configPath?: string;
+  readonly reviewerFilter?: string;
 };
 
 export function loadConfig(): Config {
@@ -68,6 +72,8 @@ export function loadConfig(): Config {
     guidance: env.LOUPE_PROMPT_FILE
       ? readFileSync(env.LOUPE_PROMPT_FILE, "utf8")
       : undefined,
+    configPath: env.LOUPE_CONFIG,
+    reviewerFilter: env.LOUPE_REVIEWER,
   };
 }
 

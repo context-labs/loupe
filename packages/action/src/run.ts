@@ -24,6 +24,9 @@ export type RunInput = {
   readonly model?: string;
   readonly reasoning: ReasoningEffort;
   readonly guidance?: string;
+  readonly reviewerName?: string;
+  readonly include?: readonly string[];
+  readonly exclude?: readonly string[];
   readonly logger: Logger;
 };
 
@@ -70,6 +73,9 @@ export async function reviewPullRequest(
     model: input.model,
     reasoning: input.reasoning,
     guidance: input.guidance,
+    reviewerName: input.reviewerName,
+    include: input.include,
+    exclude: input.exclude,
     logger,
   });
 }
@@ -82,4 +88,20 @@ export function formatResult(result: ReviewResult): string {
       : "") +
     (result.requestedChanges ? " — requested changes" : "")
   );
+}
+
+const SEVERITY_MARK: Record<string, string> = {
+  blocker: "🔴",
+  warning: "🟡",
+  nit: "🔵",
+};
+
+/** Human-readable rendering of a dry-run review for the terminal. */
+export function renderReview(result: ReviewResult): string {
+  const lines = [`\nSummary: ${result.summary}\n`];
+  for (const f of [...result.inline, ...result.dropped]) {
+    lines.push(`${SEVERITY_MARK[f.severity] ?? "•"} ${f.path}:${f.line}`);
+    lines.push(`   ${f.body}\n`);
+  }
+  return lines.join("\n");
 }
