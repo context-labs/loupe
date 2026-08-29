@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type { ReasoningEffort } from "@loupe/core";
 import {
@@ -54,6 +55,10 @@ export type Config = {
 export function loadConfig(): Config {
   const env = envSchema.parse(process.env);
   const [owner, repo] = env.GITHUB_REPOSITORY.split("/") as [string, string];
+  const workdir = env.GITHUB_WORKSPACE ?? process.cwd();
+  // Config/prompt paths are relative to the checked-out repo, not the action's
+  // own cwd (the composite action runs from its own directory).
+  const inWorkspace = (p: string): string => resolve(workdir, p);
 
   return {
     token: env.GITHUB_TOKEN,
@@ -61,7 +66,7 @@ export function loadConfig(): Config {
     repo,
     pullNumber: resolvePullNumber(env.LOUPE_PR_NUMBER, env.GITHUB_EVENT_PATH),
     harnessName: env.LOUPE_HARNESS,
-    workdir: env.GITHUB_WORKSPACE ?? process.cwd(),
+    workdir,
     conventionPaths: env.LOUPE_CONVENTION_PATHS.split(",")
       .map((p) => p.trim())
       .filter(Boolean),
@@ -70,9 +75,9 @@ export function loadConfig(): Config {
     model: env.LOUPE_MODEL,
     reasoning: env.LOUPE_REASONING,
     guidance: env.LOUPE_PROMPT_FILE
-      ? readFileSync(env.LOUPE_PROMPT_FILE, "utf8")
+      ? readFileSync(inWorkspace(env.LOUPE_PROMPT_FILE), "utf8")
       : undefined,
-    configPath: env.LOUPE_CONFIG,
+    configPath: env.LOUPE_CONFIG ? inWorkspace(env.LOUPE_CONFIG) : undefined,
     reviewerFilter: env.LOUPE_REVIEWER,
   };
 }
