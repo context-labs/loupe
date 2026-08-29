@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Harness } from "@loupe/harness";
@@ -36,6 +37,8 @@ export type ReviewRequest = {
    * and the harness runs with it as its working directory.
    */
   readonly subdir?: string;
+  /** Compute and log the review without posting it to the PR. */
+  readonly dryRun?: boolean;
   readonly logger: Logger;
 };
 
@@ -95,15 +98,27 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     conventions: conventions.text,
   });
 
+  // The harness runs where the repo is checked out. Scope to the subdir only if
+  // it actually exists on disk; fall back to the workdir (or cwd) so a run
+  // without a local checkout — the whole diff is in the prompt — still spawns.
+  const scoped = subdir ? join(req.workdir, subdir) : req.workdir;
+  const harnessCwd = existsSync(scoped)
+    ? scoped
+    : existsSync(req.workdir)
+      ? req.workdir
+      : process.cwd();
+
   logger.info("Running harness", {
     harness: req.harness.name,
     filesInScope: files.length,
     promptChars: prompt.length,
+    cwd: harnessCwd,
   });
   const stdout = await req.harness.review({
     prompt,
-    workdir: subdir ? join(req.workdir, subdir) : req.workdir,
+    workdir: harnessCwd,
     env: req.harnessEnv,
+    logger,
   });
 
   const review = parseReviewOutput(stdout);
@@ -114,12 +129,30 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     });
   }
 
-  await postReview(octokit, req.ref, review, inline, dropped);
   const requestedChanges = inline.some((f) => f.severity === "blocker");
+  const verdict = requestedChanges ? "REQUEST_CHANGES" : "COMMENT";
+
+  if (req.dryRun) {
+    logger.info("Dry run — not posting review", {
+      summary: review.summary,
+      inline: inline.map(
+        (f) => `${f.path}:${f.line} [${f.severity}] ${f.body}`,
+      ),
+      dropped: dropped.length,
+      verdict,
+    });
+    return {
+      inlineCount: inline.length,
+      droppedCount: dropped.length,
+      requestedChanges,
+    };
+  }
+
+  await postReview(octokit, req.ref, review, inline, dropped);
   logger.info("Posted review", {
     inline: inline.length,
     dropped: dropped.length,
-    verdict: requestedChanges ? "REQUEST_CHANGES" : "COMMENT",
+    verdict,
   });
 
   return {

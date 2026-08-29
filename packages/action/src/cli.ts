@@ -67,6 +67,7 @@ program
     "-d, --dir <subdir>",
     "restrict review to a repo subdirectory (e.g. inference)",
   )
+  .option("--dry-run", "compute and log the review without posting it", false)
   .option("--infisical-env <env>", "Infisical environment slug")
   .option("--infisical-project <id>", "Infisical project id")
   .action(
@@ -79,6 +80,7 @@ program
         workdir: string;
         conventions: string;
         dir?: string;
+        dryRun: boolean;
         infisicalEnv?: string;
         infisicalProject?: string;
       },
@@ -102,6 +104,7 @@ program
             projectId: opts.infisicalProject,
           }),
           subdir: opts.dir,
+          dryRun: opts.dryRun,
           logger,
         });
         logger.info(formatResult(result));

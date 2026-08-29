@@ -7,6 +7,13 @@ import { reviewOutputSchema, type ReviewOutput } from "./types";
  * failure, not a silent empty review.
  */
 export function parseReviewOutput(stdout: string): ReviewOutput {
+  if (stdout.trim().length === 0) {
+    throw new Error(
+      "Harness produced no output. It may have failed to authenticate, hit a " +
+        "turn/timeout limit, or exited without emitting a review. Re-run with " +
+        "LOG_LEVEL=debug to see the harness stdout/stderr.",
+    );
+  }
   const candidate = extractLastJsonObject(stdout);
   if (!candidate) {
     throw new Error(

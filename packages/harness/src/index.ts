@@ -1,14 +1,18 @@
 import { spawn } from "node:child_process";
 
+import type { Logger } from "@loupe/logger";
+
 /**
  * What a harness needs to run a review: the fully-assembled prompt, a working
- * directory it may read from (the checked-out target repo), and the resolved
- * secrets to inject into its subprocess env (e.g. ANTHROPIC_API_KEY).
+ * directory it may read from (the checked-out target repo), the resolved
+ * secrets to inject into its subprocess env (e.g. ANTHROPIC_API_KEY), and a
+ * logger so subprocess output is observable.
  */
 export type HarnessContext = {
   readonly prompt: string;
   readonly workdir: string;
   readonly env: Record<string, string>;
+  readonly logger: Logger;
 };
 
 /**
@@ -33,12 +37,19 @@ function commandExists(cmd: string): Promise<boolean> {
   });
 }
 
-/** Run a command, feed the prompt on stdin, resolve with stdout. */
+/**
+ * Run a command, feed the prompt on stdin, resolve with stdout. stderr is
+ * streamed to the logger at debug (live visibility into what the agent is
+ * doing), and the full stdout is logged at debug on completion so an empty or
+ * non-JSON response is diagnosable. A non-zero exit rejects with stderr.
+ */
 function runCli(
   cmd: string,
   args: readonly string[],
   ctx: HarnessContext,
 ): Promise<string> {
+  const log = ctx.logger.child(cmd);
+  log.debug("Spawning harness", { args, cwd: ctx.workdir });
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: ctx.workdir,
@@ -47,9 +58,15 @@ function runCli(
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.stderr.on("data", (d: Buffer) => {
+      const chunk = d.toString();
+      stderr += chunk;
+      log.debug(chunk.trimEnd());
+    });
     child.on("error", reject);
     child.on("close", (code) => {
+      log.debug("Harness exited", { code, stdoutChars: stdout.length });
+      log.debug("Harness stdout", { stdout });
       if (code === 0) resolve(stdout);
       else reject(new Error(`${cmd} exited ${code}: ${stderr.slice(0, 2000)}`));
     });
@@ -79,17 +96,43 @@ export function codexHarness(): Harness {
 }
 
 /**
+ * whip is agentic — by default the model tries to explore the repo with tools.
+ * In a headless review there's no checkout, so a tool-use loop either exits with
+ * no final text (uncapped) or hard-fails (capped). This system prompt tells the
+ * model to answer straight from the diff, which keeps it to a single completion.
+ */
+const WHIP_SYSTEM =
+  "You are a non-interactive code reviewer in headless mode with NO repository " +
+  "access. Do NOT call any tools or try to read files — you cannot, and any " +
+  "tool call wastes the run. Review strictly from the diff in the user message " +
+  "and reply with ONLY the JSON object it asks for.";
+
+/**
  * whip (context-labs custom harness): `whip run` reads the prompt from stdin
  * and streams the reply to stdout. It self-authenticates from its own local
  * login (~/.whip/), so loupe injects no credentials — being logged in via
- * `whip auth inference-net login` is the only requirement.
+ * `whip auth inference-net login` is the only requirement. `-max-turns` caps
+ * the loop as a safety net in case the model ignores the no-tools directive.
  */
 export function whipHarness(): Harness {
   return {
     name: "whip",
     credentialKeys: [],
     available: () => commandExists("whip"),
-    review: (ctx) => runCli("whip", ["run", "-quiet", "-no-session"], ctx),
+    review: (ctx) =>
+      runCli(
+        "whip",
+        [
+          "run",
+          "-quiet",
+          "-no-session",
+          "-max-turns",
+          "10",
+          "-system",
+          WHIP_SYSTEM,
+        ],
+        ctx,
+      ),
   };
 }
 

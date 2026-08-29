@@ -44,7 +44,10 @@ bun run packages/action/src/cli.ts review owner/repo#123 --harness claude
 
 Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`. Flags:
 `--harness`, `--providers env,dotenv,infisical`, `--conventions`, `--workdir`,
-`--infisical-env`, `--infisical-project`.
+`--dir`, `--dry-run`, `--infisical-env`, `--infisical-project`.
+
+Use `--dry-run` to compute and log the review (with `LOG_LEVEL=debug` to see the
+raw harness output) without posting anything to the PR — the safe way to test.
 
 ## Scope to a subdirectory
 

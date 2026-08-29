@@ -16,6 +16,7 @@ export type RunInput = {
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
   readonly subdir?: string;
+  readonly dryRun?: boolean;
   readonly logger: Logger;
 };
 
@@ -59,13 +60,14 @@ export async function reviewPullRequest(
     harnessEnv,
     conventionPaths: input.conventionPaths,
     subdir: input.subdir,
+    dryRun: input.dryRun,
     logger,
   });
 }
 
 export function formatResult(result: ReviewResult): string {
   return (
-    `loupe: posted ${result.inlineCount} inline comment(s)` +
+    `loupe: ${result.inlineCount} inline comment(s)` +
     (result.droppedCount > 0
       ? `, ${result.droppedCount} off-diff note(s)`
       : "") +

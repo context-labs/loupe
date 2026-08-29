@@ -51,4 +51,24 @@ describe("parseReviewOutput", () => {
   it("throws on missing JSON", () => {
     expect(() => parseReviewOutput("no json here")).toThrow();
   });
+
+  it("throws a clear error on empty output", () => {
+    expect(() => parseReviewOutput("   \n ")).toThrow(/no output/i);
+  });
+
+  it("normalizes off-scale severities onto blocker/warning/nit", () => {
+    const out = parseReviewOutput(
+      '{"summary":"s","findings":[' +
+        '{"path":"a","line":1,"severity":"critical","body":"x"},' +
+        '{"path":"b","line":2,"severity":"major","body":"y"},' +
+        '{"path":"c","line":3,"severity":"MINOR","body":"z"},' +
+        '{"path":"d","line":4,"severity":"whoknows","body":"w"}]}',
+    );
+    expect(out.findings.map((f) => f.severity)).toEqual([
+      "blocker",
+      "warning",
+      "nit",
+      "warning",
+    ]);
+  });
 });
