@@ -61,7 +61,11 @@ function runCli(
     });
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stdout.on("data", (d: Buffer) => {
+      const chunk = d.toString();
+      stdout += chunk;
+      log.debug(chunk.trimEnd());
+    });
     child.stderr.on("data", (d: Buffer) => {
       const chunk = d.toString();
       stderr += chunk;
@@ -117,11 +121,93 @@ export function codexHarness(): Harness {
 }
 
 /**
- * whip (context-labs custom harness): `whip run` reads the user prompt from
- * stdin, `-system` sets the reviewer/output/headless instructions. It
- * self-authenticates from its own local login (~/.whip/), so loupe injects no
- * credentials. `-max-turns` caps the tool loop as a safety net in case the
- * model ignores the headless (no-tools) directive in the system prompt.
+ * Stream whip's `--format json` NDJSON event stream, logging activity live
+ * (tool calls at info, reply text as it arrives at debug) so a long run is
+ * observable instead of silent. Resolves with the assembled assistant text
+ * (the review JSON), so the core parses it the same as any other harness.
+ */
+function runWhipStreaming(
+  args: readonly string[],
+  ctx: HarnessContext,
+): Promise<string> {
+  const log = ctx.logger.child("whip");
+  log.debug("Spawning harness", { args, cwd: ctx.workdir, model: ctx.model });
+  return new Promise((resolve, reject) => {
+    const child = spawn("whip", args, {
+      cwd: ctx.workdir,
+      env: { ...process.env, ...ctx.env },
+    });
+    let buffer = ""; // partial NDJSON line
+    let text = ""; // accumulated assistant reply
+    let logged = 0; // chars already flushed to the log
+    let stderr = "";
+    let final: string | undefined;
+
+    const handle = (line: string): void => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(trimmed) as Record<string, unknown>;
+      } catch {
+        log.debug(trimmed); // non-JSON note — surface it raw
+        return;
+      }
+      switch (event["type"]) {
+        case "text":
+          if (typeof event["delta"] === "string") text += event["delta"];
+          if (text.length - logged >= 120) {
+            log.info("streaming reply", { chars: text.length });
+            logged = text.length;
+          }
+          break;
+        case "tool_start":
+          log.info("tool call", { name: event["name"], args: event["args"] });
+          break;
+        case "tool_end":
+          log.info("tool result", { name: event["name"] });
+          break;
+        case "done":
+          final = typeof event["text"] === "string" ? event["text"] : text;
+          break;
+        case "error":
+          reject(new Error(`whip error: ${JSON.stringify(event["error"])}`));
+          break;
+        default:
+          log.debug("event", event);
+      }
+    };
+
+    child.stdout.on("data", (d: Buffer) => {
+      buffer += d.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) handle(line);
+    });
+    child.stderr.on("data", (d: Buffer) => {
+      const chunk = d.toString();
+      stderr += chunk;
+      log.debug(chunk.trimEnd());
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (buffer.trim()) handle(buffer);
+      const out = final ?? text;
+      log.debug("Harness exited", { code, replyChars: out.length });
+      if (code === 0) resolve(out);
+      else reject(new Error(`whip exited ${code}: ${stderr.slice(0, 2000)}`));
+    });
+    child.stdin.write(ctx.userPrompt);
+    child.stdin.end();
+  });
+}
+
+/**
+ * whip (context-labs custom harness): runs `whip run --format json` and streams
+ * the event log live. `-system` sets the reviewer/output/headless instructions.
+ * It self-authenticates from its own local login (~/.whip/), so loupe injects no
+ * credentials. `-max-turns` caps the tool loop as a safety net in case the model
+ * ignores the headless (no-tools) directive in the system prompt.
  */
 export function whipHarness(): Harness {
   return {
@@ -131,6 +217,8 @@ export function whipHarness(): Harness {
     review: (ctx) => {
       const args = [
         "run",
+        "--format",
+        "json",
         "-quiet",
         "-no-session",
         "-max-turns",
@@ -139,7 +227,7 @@ export function whipHarness(): Harness {
         ctx.systemPrompt,
       ];
       if (ctx.model) args.push("-m", ctx.model);
-      return runCli("whip", args, ctx.userPrompt, ctx);
+      return runWhipStreaming(args, ctx);
     },
   };
 }
