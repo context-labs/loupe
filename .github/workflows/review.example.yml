@@ -1,0 +1,23 @@
+# Copy this into a consuming repo as .github/workflows/loupe.yml
+# (or reference it as a reusable/required workflow at the org level).
+name: loupe
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: your-org/loupe@v0
+        with:
+          github-token: ${{ github.token }}
+          harness: claude
+        env:
+          # The harness CLI reads this; loupe's env provider forwards it in.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

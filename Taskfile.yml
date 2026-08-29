@@ -1,0 +1,38 @@
+version: "3"
+output: prefixed
+
+env:
+  NODE_MAJOR_VERSION: "24"
+  BUN_VERSION: '{{.BUN_VERSION | default "1.3.14"}}'
+
+tasks:
+  format:
+    cmds:
+      - ./node_modules/.bin/oxfmt --check "**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
+  format:fix:
+    cmds:
+      - ./node_modules/.bin/oxfmt --write "**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"
+  lint:
+    cmds:
+      - ./node_modules/.bin/oxlint --type-aware
+  lint:fix:
+    cmds:
+      - ./node_modules/.bin/oxlint --type-aware --fix
+  tsc:
+    env:
+      GOMEMLIMIT: '{{.TSC_MEMORY_LIMIT | default "4GiB"}}'
+    cmds:
+      - ./node_modules/typescript-7/bin/tsc --build
+  test:
+    cmds:
+      - ./node_modules/.bin/vitest run
+  check:
+    cmds:
+      - task: format
+      - task: lint
+      - task: tsc
+      - task: test
+  fix:
+    cmds:
+      - task: format:fix
+      - task: lint:fix

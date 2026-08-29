@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": true,
+  "trailingComma": "all",
+  "singleQuote": false,
+  "printWidth": 80,
+  "tabWidth": 2,
+  "importOrder": [
+    "<TYPES>",
+    "^node:",
+    "^bun$",
+    "<THIRD_PARTY_MODULES>",
+    "",
+    "<TYPES>^@loupe",
+    "^@loupe/(.*)$",
+    "",
+    "<TYPES>^[.|..|~]",
+    "^[../]",
+    "^[./]"
+  ],
+  "sortPackageJson": false,
+  "ignorePatterns": ["**/dist", "**/build"]
+}

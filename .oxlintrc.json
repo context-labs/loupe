@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "import"],
+  "categories": { "correctness": "error" },
+  "options": { "typeAware": true },
+  "env": { "builtin": true },
+  "ignorePatterns": ["**/dist/**", "**/build/**", "**/coverage/**"],
+  "rules": {
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/consistent-type-imports": [
+      "warn",
+      { "prefer": "type-imports", "fixStyle": "separate-type-imports" }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/tests/**/*.ts"],
+      "rules": {
+        "typescript/no-explicit-any": "off",
+        "typescript/no-non-null-assertion": "off"
+      }
+    }
+  ]
+}

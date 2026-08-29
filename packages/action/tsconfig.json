@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./dist",
+    "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json"
+  },
+  "references": [
+    { "path": "../core" },
+    { "path": "../credentials" },
+    { "path": "../harness" }
+  ],
+  "include": ["src", "tests"]
+}

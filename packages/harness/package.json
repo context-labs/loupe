@@ -1,0 +1,15 @@
+{
+  "name": "@loupe/harness",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "tsc": "../../node_modules/typescript-7/bin/tsc --build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "bun-types": "1.3.14",
+    "vitest": "4.1.10"
+  }
+}

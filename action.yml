@@ -1,0 +1,39 @@
+name: "loupe"
+description: "AI PR reviewer that posts inline comments, harness-agnostic, reads your repo's own conventions."
+branding:
+  icon: "search"
+  color: "purple"
+inputs:
+  github-token:
+    description: "Token used to read the PR and post the review."
+    required: true
+    default: ${{ github.token }}
+  harness:
+    description: "Which agent CLI to review with (claude, codex)."
+    required: false
+    default: "claude"
+  credential-providers:
+    description: "Comma-separated credential provider chain (env, dotenv, infisical)."
+    required: false
+    default: "env"
+  convention-paths:
+    description: "Comma-separated repo docs to enforce, in priority order."
+    required: false
+    default: "CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md"
+runs:
+  using: "composite"
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: "1.3.14"
+    - shell: bash
+      working-directory: ${{ github.action_path }}
+      run: bun install --frozen-lockfile
+    - shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        LOUPE_HARNESS: ${{ inputs.harness }}
+        LOUPE_CREDENTIAL_PROVIDERS: ${{ inputs.credential-providers }}
+        LOUPE_CONVENTION_PATHS: ${{ inputs.convention-paths }}
+      run: bun run packages/action/src/main.ts
