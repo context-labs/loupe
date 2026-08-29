@@ -142,6 +142,8 @@ function runWhipStreaming(
     let buffer = ""; // partial NDJSON line
     let text = ""; // accumulated assistant reply
     let logged = 0; // chars already flushed to the log
+    let thinking = 0; // reasoning chars seen
+    let thinkingLogged = 0; // reasoning chars already flushed to the log
     let stderr = "";
     let final: string | undefined;
 
@@ -156,6 +158,15 @@ function runWhipStreaming(
         return;
       }
       switch (event["type"]) {
+        case "reasoning":
+          if (typeof event["delta"] === "string") {
+            thinking += event["delta"].length;
+          }
+          if (thinking - thinkingLogged >= 200) {
+            log.info("thinking", { chars: thinking });
+            thinkingLogged = thinking;
+          }
+          break;
         case "text":
           if (typeof event["delta"] === "string") text += event["delta"];
           if (text.length - logged >= 120) {
