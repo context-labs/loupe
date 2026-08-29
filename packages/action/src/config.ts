@@ -25,6 +25,7 @@ const envSchema = z.object({
   LOUPE_CREDENTIAL_PROVIDERS: z.string().default("env,dotenv"),
   LOUPE_INFISICAL_ENV: z.string().optional(),
   LOUPE_INFISICAL_PROJECT_ID: z.string().optional(),
+  LOUPE_DIR: z.string().optional(),
 });
 
 export type Config = {
@@ -36,6 +37,7 @@ export type Config = {
   readonly workdir: string;
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
+  readonly subdir?: string;
 };
 
 export function loadConfig(): Config {
@@ -53,6 +55,7 @@ export function loadConfig(): Config {
       .map((p) => p.trim())
       .filter(Boolean),
     providers: buildProviders(env),
+    subdir: env.LOUPE_DIR,
   };
 }
 

@@ -5,11 +5,5 @@
     "outDir": "./dist",
     "tsBuildInfoFile": "node_modules/.cache/tsbuildinfo.json"
   },
-  "references": [
-    { "path": "../core" },
-    { "path": "../credentials" },
-    { "path": "../harness" },
-    { "path": "../logger" }
-  ],
   "include": ["src", "tests"]
 }

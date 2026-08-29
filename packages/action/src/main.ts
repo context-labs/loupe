@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
+import { createRootLogger, shutdownLogger } from "@loupe/logger";
+
 import { loadConfig } from "./config";
 import { formatResult, reviewPullRequest } from "./run";
+
+const logger = createRootLogger("loupe-action");
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -13,11 +17,17 @@ async function main(): Promise<void> {
     workdir: config.workdir,
     conventionPaths: config.conventionPaths,
     providers: config.providers,
+    subdir: config.subdir,
+    logger,
   });
-  console.log(formatResult(result));
+  logger.info(formatResult(result));
 }
 
-main().catch((err: unknown) => {
-  console.error("loupe failed:", err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+main()
+  .catch((err: unknown) => {
+    logger.error("loupe failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    process.exitCode = 1;
+  })
+  .finally(() => shutdownLogger());

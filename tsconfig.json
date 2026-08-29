@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/credentials" },
     { "path": "./packages/harness" },
+    { "path": "./packages/logger" },
     { "path": "./packages/core" },
     { "path": "./packages/action" }
   ]

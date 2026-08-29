@@ -4,6 +4,7 @@ import {
   type CredentialProvider,
 } from "@loupe/credentials";
 import { getHarness } from "@loupe/harness";
+import type { Logger } from "@loupe/logger";
 
 export type RunInput = {
   readonly token: string;
@@ -14,12 +15,15 @@ export type RunInput = {
   readonly workdir: string;
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
+  readonly subdir?: string;
+  readonly logger: Logger;
 };
 
 /** Resolve the harness + its credentials, then review. Shared by Action and CLI. */
 export async function reviewPullRequest(
   input: RunInput,
 ): Promise<ReviewResult> {
+  const { logger } = input;
   const harness = getHarness(input.harnessName);
 
   if (!(await harness.available())) {
@@ -37,6 +41,11 @@ export async function reviewPullRequest(
         `Checked providers: ${input.providers.map((p) => p.name).join(", ")}`,
     );
   }
+  logger.debug("Harness ready", {
+    harness: harness.name,
+    resolvedKeys: Object.keys(harnessEnv),
+    providers: input.providers.map((p) => p.name),
+  });
 
   return runReview({
     token: input.token,
@@ -49,6 +58,8 @@ export async function reviewPullRequest(
     workdir: input.workdir,
     harnessEnv,
     conventionPaths: input.conventionPaths,
+    subdir: input.subdir,
+    logger,
   });
 }
 

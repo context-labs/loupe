@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { spawnSync } from "node:child_process";
 
+import { createRootLogger, shutdownLogger } from "@loupe/logger";
 import { Command } from "commander";
 
 import { resolveProviders } from "./config";
@@ -62,6 +63,10 @@ program
     "convention docs to enforce",
     "CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md",
   )
+  .option(
+    "-d, --dir <subdir>",
+    "restrict review to a repo subdirectory (e.g. inference)",
+  )
   .option("--infisical-env <env>", "Infisical environment slug")
   .option("--infisical-project <id>", "Infisical project id")
   .action(
@@ -73,28 +78,36 @@ program
         token?: string;
         workdir: string;
         conventions: string;
+        dir?: string;
         infisicalEnv?: string;
         infisicalProject?: string;
       },
     ) => {
-      const { owner, repo, pullNumber } = parsePr(pr);
-      const result = await reviewPullRequest({
-        token: resolveToken(opts.token),
-        owner,
-        repo,
-        pullNumber,
-        harnessName: opts.harness,
-        workdir: opts.workdir,
-        conventionPaths: opts.conventions
-          .split(",")
-          .map((p) => p.trim())
-          .filter(Boolean),
-        providers: resolveProviders(opts.providers, {
-          env: opts.infisicalEnv,
-          projectId: opts.infisicalProject,
-        }),
-      });
-      console.log(formatResult(result));
+      const logger = createRootLogger("loupe-cli");
+      try {
+        const { owner, repo, pullNumber } = parsePr(pr);
+        const result = await reviewPullRequest({
+          token: resolveToken(opts.token),
+          owner,
+          repo,
+          pullNumber,
+          harnessName: opts.harness,
+          workdir: opts.workdir,
+          conventionPaths: opts.conventions
+            .split(",")
+            .map((p) => p.trim())
+            .filter(Boolean),
+          providers: resolveProviders(opts.providers, {
+            env: opts.infisicalEnv,
+            projectId: opts.infisicalProject,
+          }),
+          subdir: opts.dir,
+          logger,
+        });
+        logger.info(formatResult(result));
+      } finally {
+        await shutdownLogger();
+      }
     },
   );
 

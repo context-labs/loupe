@@ -46,6 +46,27 @@ Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`. Flags:
 `--harness`, `--providers env,dotenv,infisical`, `--conventions`, `--workdir`,
 `--infisical-env`, `--infisical-project`.
 
+## Scope to a subdirectory
+
+For a monorepo, restrict the review to one folder — only changed files under it
+are reviewed, conventions are read from it (`inference/AGENTS.md`), and the
+harness runs there:
+
+```bash
+bun run packages/action/src/cli.ts review context-labs/monorepo#6046 \
+  --harness whip --dir inference
+```
+
+In the Action, set the `dir` input (or `LOUPE_DIR`).
+
+## Logging
+
+Structured logging via winston. `LOG_LEVEL` (`debug|info|warn|error`, default
+`info`) controls verbosity; pretty output locally, JSON under `CI=true`. Set
+`OTEL_EXPORTER_OTLP_ENDPOINT` to also export logs to an OTLP collector (via the
+winston→OpenTelemetry bridge, same as the monorepo) — otherwise logs stay
+stdout-only, so no collector is needed to run.
+
 ## Credentials
 
 `LOUPE_CREDENTIAL_PROVIDERS` is an ordered chain; first hit wins. Ships with:

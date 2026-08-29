@@ -1,5 +1,7 @@
 import { Octokit } from "@octokit/rest";
 
+import type { Logger } from "@loupe/logger";
+
 import type { DiffFile } from "./diff";
 import type { Finding, ReviewOutput } from "./types";
 
@@ -15,8 +17,21 @@ export type PullContext = {
   readonly files: readonly DiffFile[];
 };
 
-export function makeOctokit(token: string): Octokit {
-  return new Octokit({ auth: token });
+/**
+ * Octokit's default logger prints request warnings (like the expected 404s from
+ * probing for optional convention docs) straight to the console. Route them all
+ * through our logger at debug so they don't clutter info-level output.
+ */
+export function makeOctokit(token: string, logger: Logger): Octokit {
+  return new Octokit({
+    auth: token,
+    log: {
+      debug: (m) => logger.debug(m),
+      info: (m) => logger.debug(m),
+      warn: (m) => logger.debug(m),
+      error: (m) => logger.debug(m),
+    },
+  });
 }
 
 /** Fetch PR metadata and the changed files (with patches) in one place. */
@@ -41,14 +56,22 @@ export async function fetchPullContext(
  * order. Concatenated so the reviewer enforces the repo's actual rules rather
  * than a vendored copy. Missing files are skipped silently.
  */
+export type Conventions = {
+  /** Concatenated doc bodies for the prompt. */
+  readonly text: string;
+  /** Which requested paths actually resolved to a file at the PR head. */
+  readonly found: readonly string[];
+};
+
 export async function fetchConventions(
   octokit: Octokit,
   ref: PullRef,
   paths: readonly string[],
-): Promise<string> {
+): Promise<Conventions> {
   const { data: pr } = await octokit.pulls.get(ref);
   const sha = pr.head.sha;
   const parts: string[] = [];
+  const found: string[] = [];
   for (const path of paths) {
     try {
       const { data } = await octokit.repos.getContent({
@@ -60,12 +83,13 @@ export async function fetchConventions(
       if ("content" in data && data.type === "file") {
         const text = Buffer.from(data.content, "base64").toString("utf8");
         parts.push(`# ${path}\n\n${text}`);
+        found.push(path);
       }
     } catch {
       // file not present at head — skip
     }
   }
-  return parts.join("\n\n---\n\n");
+  return { text: parts.join("\n\n---\n\n"), found };
 }
 
 const SEVERITY_LABEL: Record<Finding["severity"], string> = {

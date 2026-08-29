@@ -20,6 +20,10 @@ inputs:
     description: "Comma-separated repo docs to enforce, in priority order."
     required: false
     default: "CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md"
+  dir:
+    description: "Restrict the review to a repo subdirectory (e.g. inference)."
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -36,4 +40,5 @@ runs:
         LOUPE_HARNESS: ${{ inputs.harness }}
         LOUPE_CREDENTIAL_PROVIDERS: ${{ inputs.credential-providers }}
         LOUPE_CONVENTION_PATHS: ${{ inputs.convention-paths }}
+        LOUPE_DIR: ${{ inputs.dir }}
       run: bun run packages/action/src/main.ts
