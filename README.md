@@ -32,6 +32,20 @@ See `.github/workflows/review.example.yml`. Minimal:
   env: { ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }} }
 ```
 
+## Run it locally (end-to-end test)
+
+```bash
+bun install
+ANTHROPIC_API_KEY=sk-... \
+  bun run packages/action/src/cli.ts review https://github.com/owner/repo/pull/123
+# or the shorthand:
+bun run packages/action/src/cli.ts review owner/repo#123 --harness claude
+```
+
+Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`. Flags:
+`--harness`, `--providers env,dotenv,infisical`, `--conventions`, `--workdir`,
+`--infisical-env`, `--infisical-project`.
+
 ## Credentials
 
 `LOUPE_CREDENTIAL_PROVIDERS` is an ordered chain; first hit wins. Ships with:

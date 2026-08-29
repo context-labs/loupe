@@ -73,10 +73,13 @@ function resolvePullNumber(
   );
 }
 
-function buildProviders(
-  env: z.infer<typeof envSchema>,
+/** Build a provider chain from a comma-separated spec like "env,dotenv,infisical". */
+export function resolveProviders(
+  spec: string,
+  infisical: { env?: string; projectId?: string } = {},
 ): readonly CredentialProvider[] {
-  return env.LOUPE_CREDENTIAL_PROVIDERS.split(",")
+  return spec
+    .split(",")
     .map((p) => p.trim())
     .filter(Boolean)
     .map((name) => {
@@ -86,12 +89,18 @@ function buildProviders(
         case "dotenv":
           return dotenvProvider();
         case "infisical":
-          return infisicalProvider({
-            env: env.LOUPE_INFISICAL_ENV,
-            projectId: env.LOUPE_INFISICAL_PROJECT_ID,
-          });
+          return infisicalProvider(infisical);
         default:
           throw new Error(`Unknown credential provider "${name}"`);
       }
     });
+}
+
+function buildProviders(
+  env: z.infer<typeof envSchema>,
+): readonly CredentialProvider[] {
+  return resolveProviders(env.LOUPE_CREDENTIAL_PROVIDERS, {
+    env: env.LOUPE_INFISICAL_ENV,
+    projectId: env.LOUPE_INFISICAL_PROJECT_ID,
+  });
 }

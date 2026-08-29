@@ -4,15 +4,17 @@
   "type": "module",
   "private": true,
   "exports": { ".": "./src/main.ts" },
-  "bin": { "loupe": "./src/main.ts" },
+  "bin": { "loupe": "./src/cli.ts" },
   "scripts": {
     "tsc": "../../node_modules/typescript-7/bin/tsc --build",
-    "start": "bun run src/main.ts"
+    "start": "bun run src/main.ts",
+    "cli": "bun run src/cli.ts"
   },
   "dependencies": {
     "@loupe/core": "workspace:*",
     "@loupe/credentials": "workspace:*",
-    "@loupe/harness": "workspace:*"
+    "@loupe/harness": "workspace:*",
+    "commander": "14.0.0"
   },
   "devDependencies": {
     "bun-types": "1.3.14"
