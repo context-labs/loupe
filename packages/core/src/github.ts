@@ -98,10 +98,55 @@ const SEVERITY_LABEL: Record<Finding["severity"], string> = {
   nit: "🔵 nit",
 };
 
+/** Hidden marker (per reviewer) stamped on loupe's own comments so a later run
+ * can find and clean up the previous run's comments instead of piling on. */
+function marker(reviewerName: string | undefined): string {
+  return `<!-- loupe:${reviewerName ?? "default"} -->`;
+}
+
+/**
+ * Delete this reviewer's inline comments from a previous run, so re-reviewing a
+ * PR (e.g. on every push) replaces its comments rather than duplicating them.
+ * Best-effort: a failure here must not block posting the new review.
+ */
+async function deletePriorComments(
+  octokit: Octokit,
+  ref: PullRef,
+  reviewerName: string | undefined,
+  logger: Logger,
+): Promise<void> {
+  const tag = marker(reviewerName);
+  try {
+    const comments = await octokit.paginate(octokit.pulls.listReviewComments, {
+      owner: ref.owner,
+      repo: ref.repo,
+      pull_number: ref.pull_number,
+      per_page: 100,
+    });
+    const mine = comments.filter((c) => c.body.includes(tag));
+    for (const c of mine) {
+      await octokit.pulls.deleteReviewComment({
+        owner: ref.owner,
+        repo: ref.repo,
+        comment_id: c.id,
+      });
+    }
+    if (mine.length > 0) {
+      logger.debug("Removed prior loupe comments", { count: mine.length });
+    }
+  } catch (err) {
+    logger.warn("Could not clean up prior loupe comments", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 /**
  * Post one review with inline comments. Uses REQUEST_CHANGES when any inline
  * finding is a blocker, otherwise COMMENT — never APPROVE (a bot shouldn't be a
- * required approver). Off-diff findings are appended to the summary body.
+ * required approver). Off-diff findings are appended to the summary body. First
+ * clears this reviewer's comments from the previous run so re-reviews replace
+ * rather than accumulate.
  */
 export async function postReview(
   octokit: Octokit,
@@ -109,8 +154,11 @@ export async function postReview(
   review: ReviewOutput,
   inline: readonly Finding[],
   dropped: readonly Finding[],
-  reviewerName?: string,
+  reviewerName: string | undefined,
+  logger: Logger,
 ): Promise<void> {
+  await deletePriorComments(octokit, ref, reviewerName, logger);
+
   const hasBlocker = inline.some((f) => f.severity === "blocker");
   const droppedNote =
     dropped.length > 0
@@ -118,15 +166,16 @@ export async function postReview(
         dropped.map((f) => `- \`${f.path}:${f.line}\` — ${f.body}`).join("\n")
       : "";
   const title = reviewerName ? `loupe · ${reviewerName}` : "loupe review";
+  const tag = marker(reviewerName);
 
   await octokit.pulls.createReview({
     ...ref,
     event: hasBlocker ? "REQUEST_CHANGES" : "COMMENT",
-    body: `🔍 **${title}**\n\n${review.summary}${droppedNote}`,
+    body: `🔍 **${title}**\n\n${review.summary}${droppedNote}\n\n${tag}`,
     comments: inline.map((f) => ({
       path: f.path,
       line: f.line,
-      body: `**${SEVERITY_LABEL[f.severity]}** ${f.body}`,
+      body: `**${SEVERITY_LABEL[f.severity]}** ${f.body}\n\n${tag}`,
     })),
   });
 }

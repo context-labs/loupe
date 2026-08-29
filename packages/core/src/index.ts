@@ -201,7 +201,15 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     return result;
   }
 
-  await postReview(octokit, req.ref, review, inline, dropped, req.reviewerName);
+  await postReview(
+    octokit,
+    req.ref,
+    review,
+    inline,
+    dropped,
+    req.reviewerName,
+    logger,
+  );
   logger.info("Posted review", {
     reviewer: req.reviewerName ?? "default",
     inline: inline.length,
