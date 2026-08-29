@@ -42,12 +42,52 @@ ANTHROPIC_API_KEY=sk-... \
 bun run packages/action/src/cli.ts review owner/repo#123 --harness claude
 ```
 
-Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`. Flags:
-`--harness`, `--providers env,dotenv,infisical`, `--conventions`, `--workdir`,
-`--dir`, `--dry-run`, `--infisical-env`, `--infisical-project`.
+Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`.
+
+Key flags (defaults in parens): `--harness` (whip), `--model` (kimi-k3),
+`--reasoning low|medium|high` (medium), `--prompt-file <path>` (custom reviewer
+guidance), `--dir` (subdir scope), `--providers env,dotenv,infisical` (env),
+`--dry-run`, `--conventions`, `--workdir`, `--infisical-env`,
+`--infisical-project`.
+
+```bash
+# defaults: whip + kimi-k3 + medium
+bun run packages/action/src/cli.ts review owner/repo#123
+
+# pick model + effort + a different harness
+bun run packages/action/src/cli.ts review owner/repo#123 \
+  --harness claude --model claude-opus-4-8 --reasoning high
+
+# bring your own reviewer prompt
+bun run packages/action/src/cli.ts review owner/repo#123 \
+  --prompt-file examples/loupe-prompt.md
+```
 
 Use `--dry-run` to compute and log the review (with `LOG_LEVEL=debug` to see the
-raw harness output) without posting anything to the PR — the safe way to test.
+raw harness output) without posting anything — the safe way to test.
+
+## Custom reviewer prompt
+
+The system prompt has three layers. `--prompt-file` (CLI) / `prompt-file` input
+(Action) / `LOUPE_PROMPT_FILE` replaces only the first:
+
+1. **Reviewer guidance** — persona and priorities. Default is a high-signal
+   senior-reviewer prompt; your file replaces it.
+2. **Reasoning note** — from `--reasoning`, always appended.
+3. **Output contract + headless directive** — always appended; this is why a
+   custom prompt can't break JSON parsing or trigger tool loops.
+
+See `examples/loupe-prompt.md` for the shape — write only persona/priorities,
+never the JSON schema.
+
+## GitHub integration
+
+`action.yml` is a composite Action. Copy `.github/workflows/review.example.yml`
+into a consuming repo (it has three ready variants: internal whip, external
+claude-with-secret, and custom-prompt), or register it once at the org level as
+a required workflow so it applies to every repo. Inputs mirror the CLI flags:
+`harness`, `model`, `reasoning`, `prompt-file`, `dir`, `convention-paths`,
+`credential-providers`, `github-token`.
 
 ## Scope to a subdirectory
 

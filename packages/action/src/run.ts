@@ -1,4 +1,8 @@
-import { runReview, type ReviewResult } from "@loupe/core";
+import {
+  runReview,
+  type ReasoningEffort,
+  type ReviewResult,
+} from "@loupe/core";
 import {
   resolveCredentials,
   type CredentialProvider,
@@ -17,6 +21,9 @@ export type RunInput = {
   readonly providers: readonly CredentialProvider[];
   readonly subdir?: string;
   readonly dryRun?: boolean;
+  readonly model?: string;
+  readonly reasoning: ReasoningEffort;
+  readonly guidance?: string;
   readonly logger: Logger;
 };
 
@@ -31,20 +38,19 @@ export async function reviewPullRequest(
     throw new Error(`Harness "${harness.name}" CLI is not installed.`);
   }
 
+  // Best-effort: forward whatever credential keys the providers can supply.
+  // We don't hard-fail on a missing key — harnesses often self-authenticate
+  // from a local login (whip via ~/.whip, claude via its own login). If a key
+  // is genuinely required and absent, the harness surfaces its own auth error.
   const harnessEnv = await resolveCredentials(
     harness.credentialKeys,
     input.providers,
   );
   const missing = harness.credentialKeys.filter((k) => !(k in harnessEnv));
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing credentials for harness "${harness.name}": ${missing.join(", ")}. ` +
-        `Checked providers: ${input.providers.map((p) => p.name).join(", ")}`,
-    );
-  }
   logger.debug("Harness ready", {
     harness: harness.name,
-    resolvedKeys: Object.keys(harnessEnv),
+    forwardedKeys: Object.keys(harnessEnv),
+    missingKeys: missing,
     providers: input.providers.map((p) => p.name),
   });
 
@@ -61,6 +67,9 @@ export async function reviewPullRequest(
     conventionPaths: input.conventionPaths,
     subdir: input.subdir,
     dryRun: input.dryRun,
+    model: input.model,
+    reasoning: input.reasoning,
+    guidance: input.guidance,
     logger,
   });
 }

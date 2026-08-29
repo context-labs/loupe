@@ -12,7 +12,11 @@ import {
   type PullRef,
 } from "./github";
 import { parseReviewOutput } from "./parse";
-import { buildPrompt } from "./prompt";
+import {
+  buildSystemPrompt,
+  buildUserPrompt,
+  type ReasoningEffort,
+} from "./prompt";
 import { validateFindings } from "./validate";
 
 export * from "./types";
@@ -39,6 +43,12 @@ export type ReviewRequest = {
   readonly subdir?: string;
   /** Compute and log the review without posting it to the PR. */
   readonly dryRun?: boolean;
+  /** Model id passed to the harness (e.g. "kimi-k3"). */
+  readonly model?: string;
+  /** Reasoning effort baked into the system prompt (default medium). */
+  readonly reasoning: ReasoningEffort;
+  /** Custom reviewer guidance replacing the default; contract is still appended. */
+  readonly guidance?: string;
   readonly logger: Logger;
 };
 
@@ -91,7 +101,11 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     return { inlineCount: 0, droppedCount: 0, requestedChanges: false };
   }
 
-  const prompt = buildPrompt({
+  const systemPrompt = buildSystemPrompt({
+    guidance: req.guidance,
+    reasoning: req.reasoning,
+  });
+  const userPrompt = buildUserPrompt({
     title: pull.title,
     description: pull.description,
     files,
@@ -110,12 +124,16 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
 
   logger.info("Running harness", {
     harness: req.harness.name,
+    model: req.model ?? "(harness default)",
+    reasoning: req.reasoning,
     filesInScope: files.length,
-    promptChars: prompt.length,
+    promptChars: systemPrompt.length + userPrompt.length,
     cwd: harnessCwd,
   });
   const stdout = await req.harness.review({
-    prompt,
+    systemPrompt,
+    userPrompt,
+    model: req.model,
     workdir: harnessCwd,
     env: req.harnessEnv,
     logger,

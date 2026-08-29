@@ -18,6 +18,9 @@ async function main(): Promise<void> {
     conventionPaths: config.conventionPaths,
     providers: config.providers,
     subdir: config.subdir,
+    model: config.model,
+    reasoning: config.reasoning,
+    guidance: config.guidance,
     logger,
   });
   logger.info(formatResult(result));

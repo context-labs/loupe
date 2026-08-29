@@ -3,13 +3,16 @@ import { spawn } from "node:child_process";
 import type { Logger } from "@loupe/logger";
 
 /**
- * What a harness needs to run a review: the fully-assembled prompt, a working
- * directory it may read from (the checked-out target repo), the resolved
- * secrets to inject into its subprocess env (e.g. ANTHROPIC_API_KEY), and a
- * logger so subprocess output is observable.
+ * What a harness needs to run a review: the system prompt (reviewer persona +
+ * output contract) and the user prompt (the diff), the model to use, a working
+ * directory it may read from, the resolved secrets to inject into its subprocess
+ * env (e.g. ANTHROPIC_API_KEY), and a logger so subprocess output is observable.
  */
 export type HarnessContext = {
-  readonly prompt: string;
+  readonly systemPrompt: string;
+  readonly userPrompt: string;
+  /** Model id, harness-specific (e.g. "kimi-k3", "claude-opus-4-8"). */
+  readonly model?: string;
   readonly workdir: string;
   readonly env: Record<string, string>;
   readonly logger: Logger;
@@ -38,18 +41,19 @@ function commandExists(cmd: string): Promise<boolean> {
 }
 
 /**
- * Run a command, feed the prompt on stdin, resolve with stdout. stderr is
- * streamed to the logger at debug (live visibility into what the agent is
- * doing), and the full stdout is logged at debug on completion so an empty or
- * non-JSON response is diagnosable. A non-zero exit rejects with stderr.
+ * Run a command, feed `stdin` in, resolve with stdout. stderr is streamed to the
+ * logger at debug (live visibility into what the agent is doing), and the full
+ * stdout is logged at debug on completion so an empty or non-JSON response is
+ * diagnosable. A non-zero exit rejects with stderr.
  */
 function runCli(
   cmd: string,
   args: readonly string[],
+  stdin: string,
   ctx: HarnessContext,
 ): Promise<string> {
   const log = ctx.logger.child(cmd);
-  log.debug("Spawning harness", { args, cwd: ctx.workdir });
+  log.debug("Spawning harness", { args, cwd: ctx.workdir, model: ctx.model });
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: ctx.workdir,
@@ -70,69 +74,73 @@ function runCli(
       if (code === 0) resolve(stdout);
       else reject(new Error(`${cmd} exited ${code}: ${stderr.slice(0, 2000)}`));
     });
-    child.stdin.write(ctx.prompt);
+    child.stdin.write(stdin);
     child.stdin.end();
   });
 }
 
-/** Claude Code CLI: `claude -p` reads the prompt from stdin, prints to stdout. */
+/** Claude Code CLI: `claude -p` reads the user prompt from stdin. */
 export function claudeHarness(): Harness {
   return {
     name: "claude",
     credentialKeys: ["ANTHROPIC_API_KEY"],
     available: () => commandExists("claude"),
-    review: (ctx) => runCli("claude", ["-p", "--permission-mode", "plan"], ctx),
+    review: (ctx) => {
+      const args = [
+        "-p",
+        "--permission-mode",
+        "plan",
+        "--append-system-prompt",
+        ctx.systemPrompt,
+      ];
+      if (ctx.model) args.push("--model", ctx.model);
+      return runCli("claude", args, ctx.userPrompt, ctx);
+    },
   };
 }
 
-/** OpenAI Codex CLI: `codex exec` runs a one-shot prompt. */
+/** OpenAI Codex CLI: `codex exec` runs a one-shot prompt from stdin. */
 export function codexHarness(): Harness {
   return {
     name: "codex",
     credentialKeys: ["OPENAI_API_KEY"],
     available: () => commandExists("codex"),
-    review: (ctx) => runCli("codex", ["exec", "-"], ctx),
+    review: (ctx) => {
+      const args = ["exec"];
+      if (ctx.model) args.push("--model", ctx.model);
+      // Codex has no system-prompt flag; prepend it to the piped input.
+      const stdin = `${ctx.systemPrompt}\n\n---\n\n${ctx.userPrompt}`;
+      args.push("-");
+      return runCli("codex", args, stdin, ctx);
+    },
   };
 }
 
 /**
- * whip is agentic — by default the model tries to explore the repo with tools.
- * In a headless review there's no checkout, so a tool-use loop either exits with
- * no final text (uncapped) or hard-fails (capped). This system prompt tells the
- * model to answer straight from the diff, which keeps it to a single completion.
- */
-const WHIP_SYSTEM =
-  "You are a non-interactive code reviewer in headless mode with NO repository " +
-  "access. Do NOT call any tools or try to read files — you cannot, and any " +
-  "tool call wastes the run. Review strictly from the diff in the user message " +
-  "and reply with ONLY the JSON object it asks for.";
-
-/**
- * whip (context-labs custom harness): `whip run` reads the prompt from stdin
- * and streams the reply to stdout. It self-authenticates from its own local
- * login (~/.whip/), so loupe injects no credentials — being logged in via
- * `whip auth inference-net login` is the only requirement. `-max-turns` caps
- * the loop as a safety net in case the model ignores the no-tools directive.
+ * whip (context-labs custom harness): `whip run` reads the user prompt from
+ * stdin, `-system` sets the reviewer/output/headless instructions. It
+ * self-authenticates from its own local login (~/.whip/), so loupe injects no
+ * credentials. `-max-turns` caps the tool loop as a safety net in case the
+ * model ignores the headless (no-tools) directive in the system prompt.
  */
 export function whipHarness(): Harness {
   return {
     name: "whip",
     credentialKeys: [],
     available: () => commandExists("whip"),
-    review: (ctx) =>
-      runCli(
-        "whip",
-        [
-          "run",
-          "-quiet",
-          "-no-session",
-          "-max-turns",
-          "10",
-          "-system",
-          WHIP_SYSTEM,
-        ],
-        ctx,
-      ),
+    review: (ctx) => {
+      const args = [
+        "run",
+        "-quiet",
+        "-no-session",
+        "-max-turns",
+        "10",
+        "-system",
+        ctx.systemPrompt,
+      ];
+      if (ctx.model) args.push("-m", ctx.model);
+      return runCli("whip", args, ctx.userPrompt, ctx);
+    },
   };
 }
 

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import type { ReasoningEffort } from "@loupe/core";
 import {
   dotenvProvider,
   envProvider,
@@ -18,11 +19,14 @@ const envSchema = z.object({
   GITHUB_EVENT_PATH: z.string().optional(),
   GITHUB_WORKSPACE: z.string().optional(),
   LOUPE_PR_NUMBER: z.coerce.number().int().positive().optional(),
-  LOUPE_HARNESS: z.string().default("claude"),
+  LOUPE_HARNESS: z.string().default("whip"),
+  LOUPE_MODEL: z.string().default("kimi-k3"),
+  LOUPE_REASONING: z.enum(["low", "medium", "high"]).default("medium"),
+  LOUPE_PROMPT_FILE: z.string().optional(),
   LOUPE_CONVENTION_PATHS: z
     .string()
     .default("CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md"),
-  LOUPE_CREDENTIAL_PROVIDERS: z.string().default("env,dotenv"),
+  LOUPE_CREDENTIAL_PROVIDERS: z.string().default("env"),
   LOUPE_INFISICAL_ENV: z.string().optional(),
   LOUPE_INFISICAL_PROJECT_ID: z.string().optional(),
   LOUPE_DIR: z.string().optional(),
@@ -38,6 +42,9 @@ export type Config = {
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
   readonly subdir?: string;
+  readonly model: string;
+  readonly reasoning: ReasoningEffort;
+  readonly guidance?: string;
 };
 
 export function loadConfig(): Config {
@@ -56,6 +63,11 @@ export function loadConfig(): Config {
       .filter(Boolean),
     providers: buildProviders(env),
     subdir: env.LOUPE_DIR,
+    model: env.LOUPE_MODEL,
+    reasoning: env.LOUPE_REASONING,
+    guidance: env.LOUPE_PROMPT_FILE
+      ? readFileSync(env.LOUPE_PROMPT_FILE, "utf8")
+      : undefined,
   };
 }
 

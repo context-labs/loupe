@@ -1,11 +1,21 @@
 #!/usr/bin/env bun
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
+import type { ReasoningEffort } from "@loupe/core";
 import { createRootLogger, shutdownLogger } from "@loupe/logger";
 import { Command } from "commander";
 
 import { resolveProviders } from "./config";
 import { formatResult, reviewPullRequest } from "./run";
+
+const REASONING: readonly ReasoningEffort[] = ["low", "medium", "high"];
+
+function parseReasoning(raw: string): ReasoningEffort {
+  if ((REASONING as readonly string[]).includes(raw))
+    return raw as ReasoningEffort;
+  throw new Error(`Invalid --reasoning "${raw}". Use: ${REASONING.join(", ")}`);
+}
 
 /** Parse owner/repo/number from a GitHub PR URL or an owner/repo#N shorthand. */
 function parsePr(input: string): {
@@ -50,7 +60,17 @@ program
   .command("review")
   .description("Review a pull request and post inline comments")
   .argument("<pr>", "PR URL (github.com/owner/repo/pull/N) or owner/repo#N")
-  .option("-H, --harness <name>", "agent CLI to review with", "claude")
+  .option("-H, --harness <name>", "agent CLI to review with", "whip")
+  .option("-m, --model <name>", "model id for the harness", "kimi-k3")
+  .option(
+    "-r, --reasoning <level>",
+    "reasoning effort: low|medium|high",
+    "medium",
+  )
+  .option(
+    "--prompt-file <path>",
+    "custom reviewer guidance replacing the default (output contract still enforced)",
+  )
   .option("-p, --providers <spec>", "credential provider chain", "env,dotenv")
   .option("-t, --token <token>", "GitHub token (else GITHUB_TOKEN or gh)")
   .option(
@@ -75,6 +95,9 @@ program
       pr: string,
       opts: {
         harness: string;
+        model: string;
+        reasoning: string;
+        promptFile?: string;
         providers: string;
         token?: string;
         workdir: string;
@@ -105,6 +128,11 @@ program
           }),
           subdir: opts.dir,
           dryRun: opts.dryRun,
+          model: opts.model,
+          reasoning: parseReasoning(opts.reasoning),
+          guidance: opts.promptFile
+            ? readFileSync(opts.promptFile, "utf8")
+            : undefined,
           logger,
         });
         logger.info(formatResult(result));

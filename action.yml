@@ -9,9 +9,21 @@ inputs:
     required: true
     default: ${{ github.token }}
   harness:
-    description: "Which agent CLI to review with (claude, codex)."
+    description: "Which agent CLI to review with (whip, claude, codex)."
     required: false
-    default: "claude"
+    default: "whip"
+  model:
+    description: "Model id for the harness (e.g. kimi-k3, claude-opus-4-8)."
+    required: false
+    default: "kimi-k3"
+  reasoning:
+    description: "Reasoning effort: low, medium, or high."
+    required: false
+    default: "medium"
+  prompt-file:
+    description: "Path to a custom reviewer-guidance file (output contract still enforced)."
+    required: false
+    default: ""
   credential-providers:
     description: "Comma-separated credential provider chain (env, dotenv, infisical)."
     required: false
@@ -38,6 +50,9 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         LOUPE_HARNESS: ${{ inputs.harness }}
+        LOUPE_MODEL: ${{ inputs.model }}
+        LOUPE_REASONING: ${{ inputs.reasoning }}
+        LOUPE_PROMPT_FILE: ${{ inputs.prompt-file }}
         LOUPE_CREDENTIAL_PROVIDERS: ${{ inputs.credential-providers }}
         LOUPE_CONVENTION_PATHS: ${{ inputs.convention-paths }}
         LOUPE_DIR: ${{ inputs.dir }}

@@ -1,5 +1,5 @@
-# Copy this into a consuming repo as .github/workflows/loupe.yml
-# (or reference it as a reusable/required workflow at the org level).
+# Copy into a consuming repo as .github/workflows/loupe.yml, or reference loupe
+# as a reusable/required workflow at the org level. Three variants below.
 name: loupe
 on:
   pull_request:
@@ -7,17 +7,44 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: write # required to post the inline review
 
 jobs:
-  review:
+  # --- Variant A: internal (whip + inference.net) ---------------------------
+  # whip self-authenticates from its own login; nothing to wire but the login.
+  review-whip:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: your-org/loupe@v0
+      - uses: context-labs/loupe@v0
         with:
-          github-token: ${{ github.token }}
+          harness: whip
+          model: kimi-k3
+          reasoning: medium
+          dir: inference # scope a monorepo to one folder (optional)
+
+  # --- Variant B: external (claude + API key secret) ------------------------
+  review-claude:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: context-labs/loupe@v0
+        with:
           harness: claude
+          model: claude-opus-4-8
+          reasoning: high
         env:
           # The harness CLI reads this; loupe's env provider forwards it in.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # --- Variant C: custom reviewer prompt ------------------------------------
+  # Point prompt-file at a doc in your repo. Your guidance replaces the default;
+  # loupe still appends the JSON output contract, so parsing can't break.
+  review-custom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: context-labs/loupe@v0
+        with:
+          harness: whip
+          prompt-file: .github/loupe-prompt.md
