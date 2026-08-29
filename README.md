@@ -50,6 +50,10 @@ Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`. Flags:
 
 `LOUPE_CREDENTIAL_PROVIDERS` is an ordered chain; first hit wins. Ships with:
 
+Harnesses that self-authenticate need no provider at all. `whip` reviews using
+its own local login (`~/.whip/`), so `loupe review --harness whip` just works
+once `whip auth inference-net login` has been run — no keys to wire.
+
 - `env` — `process.env` (default; works with plain GitHub secrets)
 - `dotenv` — a `.env` file
 - `infisical` — the Infisical CLI (`LOUPE_INFISICAL_ENV`, `LOUPE_INFISICAL_PROJECT_ID`)

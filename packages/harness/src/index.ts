@@ -78,8 +78,23 @@ export function codexHarness(): Harness {
   };
 }
 
+/**
+ * whip (context-labs custom harness): `whip run` reads the prompt from stdin
+ * and streams the reply to stdout. It self-authenticates from its own local
+ * login (~/.whip/), so loupe injects no credentials — being logged in via
+ * `whip auth inference-net login` is the only requirement.
+ */
+export function whipHarness(): Harness {
+  return {
+    name: "whip",
+    credentialKeys: [],
+    available: () => commandExists("whip"),
+    review: (ctx) => runCli("whip", ["run", "-quiet", "-no-session"], ctx),
+  };
+}
+
 export function registry(): Map<string, Harness> {
-  const harnesses = [claudeHarness(), codexHarness()];
+  const harnesses = [claudeHarness(), codexHarness(), whipHarness()];
   return new Map(harnesses.map((h) => [h.name, h]));
 }
 
