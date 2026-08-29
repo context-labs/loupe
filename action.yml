@@ -36,6 +36,14 @@ inputs:
     description: "Restrict the review to a repo subdirectory (e.g. inference)."
     required: false
     default: ""
+  config:
+    description: "Path to a .loupe.json reviewer-profiles config (runs each matching reviewer)."
+    required: false
+    default: ""
+  reviewer:
+    description: "Run only this named reviewer from the config."
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -56,4 +64,6 @@ runs:
         LOUPE_CREDENTIAL_PROVIDERS: ${{ inputs.credential-providers }}
         LOUPE_CONVENTION_PATHS: ${{ inputs.convention-paths }}
         LOUPE_DIR: ${{ inputs.dir }}
+        LOUPE_CONFIG: ${{ inputs.config }}
+        LOUPE_REVIEWER: ${{ inputs.reviewer }}
       run: bun run packages/action/src/main.ts
