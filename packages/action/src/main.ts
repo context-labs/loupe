@@ -37,6 +37,7 @@ async function main(): Promise<void> {
         guidance: r.guidance,
         include: r.include,
         exclude: r.exclude,
+        agentic: r.agentic,
         model: r.model ?? config.model,
         reasoning: r.reasoning ?? config.reasoning,
         logger,

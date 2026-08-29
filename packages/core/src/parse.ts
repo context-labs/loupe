@@ -1,4 +1,4 @@
-import { reviewOutputSchema, type ReviewOutput } from "./types";
+import { findingSchema, reviewOutputSchema, type ReviewOutput } from "./types";
 
 /**
  * Pull the review JSON out of a harness's raw stdout. CLIs wrap output in prose
@@ -21,7 +21,14 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
     );
   }
   const parsed: unknown = JSON.parse(candidate);
-  return reviewOutputSchema.parse(parsed);
+  const { summary, findings } = reviewOutputSchema.parse(parsed);
+  // Validate each finding independently; drop malformed ones (e.g. missing
+  // path/line/body) rather than rejecting the entire review.
+  const valid = findings.flatMap((f) => {
+    const result = findingSchema.safeParse(f);
+    return result.success ? [result.data] : [];
+  });
+  return { summary, findings: valid };
 }
 
 /** Scan for the last top-level {...} by brace-depth, ignoring string contents. */

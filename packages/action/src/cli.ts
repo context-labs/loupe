@@ -93,6 +93,11 @@ program
     "reviewer-profiles config (.loupe.json) — runs each matching reviewer",
   )
   .option("--reviewer <name>", "run only this named reviewer from --config")
+  .option(
+    "--agentic",
+    "let the harness use tools to inspect the checkout (needs --workdir at a checkout)",
+    false,
+  )
   .option("--dry-run", "compute and log the review without posting it", false)
   .option("--infisical-env <env>", "Infisical environment slug")
   .option("--infisical-project <id>", "Infisical project id")
@@ -111,6 +116,7 @@ program
         dir?: string;
         config?: string;
         reviewer?: string;
+        agentic: boolean;
         dryRun: boolean;
         infisicalEnv?: string;
         infisicalProject?: string;
@@ -157,6 +163,7 @@ program
               guidance: r.guidance,
               include: r.include,
               exclude: r.exclude,
+              agentic: r.agentic ?? opts.agentic,
               model: r.model ?? opts.model,
               reasoning: parseReasoning(r.reasoning ?? opts.reasoning),
               logger,
@@ -169,6 +176,7 @@ program
 
         const result = await reviewPullRequest({
           ...base,
+          agentic: opts.agentic,
           model: opts.model,
           reasoning: parseReasoning(opts.reasoning),
           guidance: opts.promptFile

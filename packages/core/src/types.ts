@@ -24,10 +24,13 @@ const SEVERITY_ALIASES: Record<string, Severity> = {
   suggestion: "nit",
 };
 
+// Severity is often missing or off-scale; never let that reject a finding.
 const severitySchema = z
   .string()
+  .optional()
   .transform(
-    (s): Severity => SEVERITY_ALIASES[s.toLowerCase().trim()] ?? "warning",
+    (s): Severity =>
+      s ? (SEVERITY_ALIASES[s.toLowerCase().trim()] ?? "warning") : "warning",
   );
 
 /**
@@ -37,15 +40,22 @@ const severitySchema = z
  */
 export const findingSchema = z.object({
   path: z.string(),
-  line: z.number().int().positive(),
+  line: z.coerce.number().int().positive(),
   severity: severitySchema,
   body: z.string(),
 });
 export type Finding = z.infer<typeof findingSchema>;
 
-/** The harness must emit exactly this: a JSON object with a `findings` array. */
+/**
+ * The harness's JSON: a summary plus a findings array. Findings are validated
+ * individually by the parser so one malformed entry can't reject the whole
+ * review — keep the array loose here.
+ */
 export const reviewOutputSchema = z.object({
-  summary: z.string(),
-  findings: z.array(findingSchema),
+  summary: z.string().default(""),
+  findings: z.array(z.unknown()).default([]),
 });
-export type ReviewOutput = z.infer<typeof reviewOutputSchema>;
+export type ReviewOutput = {
+  readonly summary: string;
+  readonly findings: readonly Finding[];
+};

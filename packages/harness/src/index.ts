@@ -13,6 +13,8 @@ export type HarnessContext = {
   readonly userPrompt: string;
   /** Model id, harness-specific (e.g. "kimi-k3", "claude-opus-4-8"). */
   readonly model?: string;
+  /** Allow the agent to use tools and explore the checkout (vs diff-only). */
+  readonly agentic?: boolean;
   readonly workdir: string;
   readonly env: Record<string, string>;
   readonly logger: Logger;
@@ -215,6 +217,9 @@ export function whipHarness(): Harness {
     credentialKeys: [],
     available: () => commandExists("whip"),
     review: (ctx) => {
+      // Agentic reviews need room to explore the checkout with tools; headless
+      // diff-only reviews should answer in one turn, capped as a safety net.
+      const maxTurns = ctx.agentic ? "40" : "10";
       const args = [
         "run",
         "--format",
@@ -222,7 +227,7 @@ export function whipHarness(): Harness {
         "-quiet",
         "-no-session",
         "-max-turns",
-        "10",
+        maxTurns,
         "-system",
         ctx.systemPrompt,
       ];

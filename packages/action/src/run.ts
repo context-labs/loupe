@@ -27,6 +27,7 @@ export type RunInput = {
   readonly reviewerName?: string;
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
+  readonly agentic?: boolean;
   readonly logger: Logger;
 };
 
@@ -76,6 +77,7 @@ export async function reviewPullRequest(
     reviewerName: input.reviewerName,
     include: input.include,
     exclude: input.exclude,
+    agentic: input.agentic,
     logger,
   });
 }

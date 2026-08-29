@@ -22,6 +22,8 @@ const reviewerSchema = z
     exclude: z.array(z.string()).optional(),
     model: z.string().optional(),
     reasoning: z.enum(["low", "medium", "high"]).optional(),
+    /** Let this reviewer use tools to explore the checkout (needs a workdir). */
+    agentic: z.boolean().optional(),
   })
   .refine((r) => !(r.prompt && r.promptFile), {
     message: "reviewer has both prompt and promptFile; use one",
@@ -36,6 +38,7 @@ export type Reviewer = {
   readonly exclude?: readonly string[];
   readonly model?: string;
   readonly reasoning?: ReasoningEffort;
+  readonly agentic?: boolean;
 };
 
 /**
@@ -58,5 +61,6 @@ export function loadReviewers(configPath: string): Reviewer[] {
     exclude: r.exclude,
     model: r.model,
     reasoning: r.reasoning,
+    agentic: r.agentic,
   }));
 }

@@ -63,6 +63,14 @@ You are running headless with NO repository access. Do NOT call tools or attempt
 to read files — you cannot, and any tool call wastes the run. Base the entire
 review on the diff in the user message.`.trim();
 
+const AGENTIC_DIRECTIVE = `
+You HAVE repository access: the full checkout is your working directory and you
+may use your tools to read files. Use them deliberately to assess real-world
+impact — inspect the actual schema/table definitions, related migrations, model
+and query code, and existing indexes/constraints the diff interacts with. Ground
+each finding in what you actually found in the codebase, not just the diff. When
+you are done investigating, respond with ONLY the final JSON object.`.trim();
+
 const REASONING_NOTE: Record<ReasoningEffort, string> = {
   low: "Reasoning effort: low. Do a quick pass; flag only obvious, high-confidence issues.",
   medium:
@@ -71,17 +79,19 @@ const REASONING_NOTE: Record<ReasoningEffort, string> = {
 };
 
 /**
- * Assemble the full system prompt: reviewer guidance (default or custom) plus
- * the always-on reasoning note, headless directive, and output contract.
+ * Assemble the full system prompt: reviewer guidance (default or custom), the
+ * reasoning note, the tool-access directive (headless diff-only by default, or
+ * agentic with repo access), and the output contract.
  */
 export function buildSystemPrompt(opts: {
   guidance?: string;
   reasoning: ReasoningEffort;
+  agentic?: boolean;
 }): string {
   return [
     opts.guidance?.trim() || DEFAULT_REVIEW_GUIDANCE,
     REASONING_NOTE[opts.reasoning],
-    HEADLESS_DIRECTIVE,
+    opts.agentic ? AGENTIC_DIRECTIVE : HEADLESS_DIRECTIVE,
     OUTPUT_CONTRACT,
   ].join("\n\n");
 }

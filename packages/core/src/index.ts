@@ -56,6 +56,8 @@ export type ReviewRequest = {
   readonly include?: readonly string[];
   /** Exclude changed files matching these globs. */
   readonly exclude?: readonly string[];
+  /** Let the harness use tools to explore the checkout (needs a real workdir). */
+  readonly agentic?: boolean;
   readonly logger: Logger;
 };
 
@@ -127,6 +129,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   const systemPrompt = buildSystemPrompt({
     guidance: req.guidance,
     reasoning: req.reasoning,
+    agentic: req.agentic,
   });
   const userPrompt = buildUserPrompt({
     title: pull.title,
@@ -145,10 +148,18 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       ? req.workdir
       : process.cwd();
 
+  if (req.agentic && !existsSync(scoped)) {
+    logger.warn(
+      "Agentic review has no matching checkout on disk; the agent can't inspect real files. Pass --workdir pointing at a checkout.",
+      { scoped, fallbackCwd: harnessCwd },
+    );
+  }
+
   logger.info("Running harness", {
     harness: req.harness.name,
     model: req.model ?? "(harness default)",
     reasoning: req.reasoning,
+    agentic: req.agentic ?? false,
     filesInScope: files.length,
     promptChars: systemPrompt.length + userPrompt.length,
     cwd: harnessCwd,
@@ -157,6 +168,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     systemPrompt,
     userPrompt,
     model: req.model,
+    agentic: req.agentic,
     workdir: harnessCwd,
     env: req.harnessEnv,
     logger,
