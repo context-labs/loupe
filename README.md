@@ -6,6 +6,9 @@ Approve-less `COMMENT` / `REQUEST_CHANGES` verdict), is **harness-agnostic**
 conventions** by reading its `CLAUDE.md` / `AGENTS.md` at review time — no
 vendored rules, nothing to keep in sync.
 
+**Docs:** [`docs/`](docs/README.md) — user guide, configuration, credentials,
+GitHub Action, and the maintainer architecture reference.
+
 ## How it works
 
 ```
