@@ -56,6 +56,10 @@ inputs:
     description: "Review the whole PR instead of the incremental delta (true/false)."
     required: false
     default: "false"
+  ensemble:
+    description: "Comma-separated models to ensemble; keep findings a majority agree on."
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -81,4 +85,5 @@ runs:
         LOUPE_PROFILE: ${{ inputs.profile }}
         LOUPE_VERIFY: ${{ inputs.verify }}
         LOUPE_FULL: ${{ inputs.full }}
+        LOUPE_ENSEMBLE: ${{ inputs.ensemble }}
       run: bun run packages/action/src/main.ts

@@ -51,6 +51,9 @@ export async function runReviews(
         profile: r.profile ?? config.profile,
         verify: r.verify ?? config.verify,
         pathInstructions: r.pathInstructions,
+        ensembleModels:
+          r.ensemble ??
+          (config.ensembleModels.length ? config.ensembleModels : undefined),
         logger,
       });
       logger.info(`[${r.name}] ${formatResult(result)}`);
@@ -64,6 +67,9 @@ export async function runReviews(
     reasoning: config.reasoning,
     profile: config.profile,
     guidance: config.guidance,
+    ensembleModels: config.ensembleModels.length
+      ? config.ensembleModels
+      : undefined,
     logger,
   });
   logger.info(formatResult(result));

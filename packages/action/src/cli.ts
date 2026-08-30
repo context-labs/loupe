@@ -105,6 +105,10 @@ program
     "review one-shot from the diff only, instead of exploring the checkout with tools",
   )
   .option("--profile <name>", "noise profile: quiet|chill|assertive", "chill")
+  .option(
+    "--ensemble <models>",
+    "comma-separated models to ensemble; keep findings a majority agree on",
+  )
   .option("--no-verify", "skip the second-opinion verification pass")
   .option(
     "--full",
@@ -131,6 +135,7 @@ program
         reviewer?: string;
         agentic: boolean;
         profile: string;
+        ensemble?: string;
         verify: boolean;
         full: boolean;
         dryRun: boolean;
@@ -141,6 +146,12 @@ program
       const logger = createRootLogger("loupe-cli");
       try {
         const { owner, repo, pullNumber } = parsePr(pr);
+        const ensembleModels = opts.ensemble
+          ? opts.ensemble
+              .split(",")
+              .map((m) => m.trim())
+              .filter(Boolean)
+          : undefined;
         const base = {
           token: resolveToken(opts.token),
           owner,
@@ -160,6 +171,7 @@ program
           dryRun: opts.dryRun,
           verify: opts.verify,
           full: opts.full,
+          ensembleModels,
         };
 
         if (opts.config) {
@@ -187,6 +199,7 @@ program
               profile: r.profile ?? parseProfile(opts.profile),
               verify: r.verify ?? opts.verify,
               pathInstructions: r.pathInstructions,
+              ensembleModels: r.ensemble ?? ensembleModels,
               logger,
             });
             logger.info(`[${r.name}] ${formatResult(result)}`);

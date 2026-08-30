@@ -32,6 +32,8 @@ const reviewerSchema = z
     pathInstructions: z
       .array(z.object({ glob: z.string(), instruction: z.string() }))
       .optional(),
+    /** Models to ensemble (>= 2 keeps only findings a majority agree on). */
+    ensemble: z.array(z.string()).optional(),
   })
   .refine((r) => !(r.prompt && r.promptFile), {
     message: "reviewer has both prompt and promptFile; use one",
@@ -50,6 +52,7 @@ export type Reviewer = {
   readonly profile?: Profile;
   readonly verify?: boolean;
   readonly pathInstructions?: readonly { glob: string; instruction: string }[];
+  readonly ensemble?: readonly string[];
 };
 
 /**
@@ -76,5 +79,6 @@ export function loadReviewers(configPath: string): Reviewer[] {
     profile: r.profile,
     verify: r.verify,
     pathInstructions: r.pathInstructions,
+    ensemble: r.ensemble,
   }));
 }

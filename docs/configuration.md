@@ -39,6 +39,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `profile` | no | Noise profile: `quiet` (blockers) \| `chill` (default) \| `assertive` (all). |
 | `verify` | no | `false` to skip the verification pass (default on). |
 | `pathInstructions` | no | `[{ glob, instruction }]` extra review instructions for matching files. |
+| `ensemble` | no | `["kimi-k3","glm-5.2-fast"]` — run several models, keep findings a majority agree on. |
 
 Globs are matched with `Bun.Glob` against repo-relative paths. `include` also
 composes with `--dir` (subdir scope).
@@ -86,6 +87,10 @@ or `LOUPE_CONVENTION_PATHS`). With `--dir`, paths resolve under the subdir
 - **Verification pass** (on by default) — after findings are produced, a cheap
   second inference judges each one real or not against the diff; rejected
   findings are dropped. Turn off with `verify: false` / `--no-verify`.
+- **Ensemble** — run the review across several models (`ensemble` /
+  `--ensemble`); only findings a majority agree on are posted, the rest go to a
+  lower-confidence section. Supersedes the verification pass. Higher precision at
+  N× the review cost.
 - **Noise profile** — `quiet` posts only blockers, `chill` (default) blockers +
   warnings, `assertive` everything. Both prompt-level and a hard severity
   filter.

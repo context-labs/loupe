@@ -43,6 +43,7 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  LOUPE_ENSEMBLE: z.string().default(""),
 });
 
 export type Config = {
@@ -63,6 +64,7 @@ export type Config = {
   readonly profile: Profile;
   readonly verify: boolean;
   readonly full: boolean;
+  readonly ensembleModels: readonly string[];
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -97,6 +99,9 @@ export function loadConfig(): Config {
     profile: env.LOUPE_PROFILE,
     verify: env.LOUPE_VERIFY,
     full: env.LOUPE_FULL,
+    ensembleModels: env.LOUPE_ENSEMBLE.split(",")
+      .map((m) => m.trim())
+      .filter(Boolean),
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,
   };

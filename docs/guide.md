@@ -53,6 +53,7 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 | `--no-agentic` | (agentic on) | Review one-shot from the diff, no tool use. |
 | `--profile <name>` | `chill` | Noise: `quiet` \| `chill` \| `assertive`. |
 | `--no-verify` | (verify on) | Skip the verification pass. |
+| `--ensemble <models>` | — | Run several models; keep findings a majority agree on. |
 | `--full` | off | Whole-PR review instead of the incremental delta. |
 | `-d, --dir <subdir>` | — | Restrict to a subdirectory (e.g. `inference`). |
 | `--config <path>` | — | `.loupe.json` reviewer profiles; runs each match. |

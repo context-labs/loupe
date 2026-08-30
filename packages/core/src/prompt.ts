@@ -183,6 +183,29 @@ export function buildChatUserPrompt(
   return [`Question:\n${question}`, "PR diff:", renderDiff(files)].join("\n\n");
 }
 
+/**
+ * Fix prompts for `@loupe fix`. The agentic harness edits files in the checkout
+ * to make the requested change; loupe commits and pushes the result.
+ */
+export function buildFixSystemPrompt(): string {
+  return [
+    "You are loupe, fixing a pull request. Make ONLY the change described, editing files directly in the working directory with your tools.",
+    "Keep the change minimal, correct, and consistent with the surrounding code and the repo's conventions.",
+    "Do NOT run git, commit, or push — only edit files. When done, briefly describe what you changed in one or two sentences.",
+  ].join("\n");
+}
+
+export function buildFixUserPrompt(
+  instruction: string,
+  files: readonly DiffFile[],
+): string {
+  return [
+    `Requested change:\n${instruction}`,
+    "PR diff for context:",
+    renderDiff(files),
+  ].join("\n\n");
+}
+
 export function buildVerifyUserPrompt(
   findings: readonly Finding[],
   files: readonly DiffFile[],

@@ -13,8 +13,14 @@ import {
   postReview,
   type PullRef,
 } from "./github";
+import { majority, mergeEnsemble } from "./ensemble";
 import { parseReviewOutput, parseVerification } from "./parse";
-import { severitiesForProfile, type Finding, type Profile } from "./types";
+import {
+  severitiesForProfile,
+  type Finding,
+  type Profile,
+  type ReviewOutput,
+} from "./types";
 import {
   buildSystemPrompt,
   buildUserPrompt,
@@ -30,6 +36,7 @@ export * from "./prompt";
 export * from "./parse";
 export * from "./validate";
 export * from "./github";
+export * from "./ensemble";
 
 export type ReviewRequest = {
   readonly token: string;
@@ -70,6 +77,12 @@ export type ReviewRequest = {
   readonly verify?: boolean;
   /** Force a full review instead of the incremental delta since last review. */
   readonly full?: boolean;
+  /**
+   * Run the review with several models (on the harness) and keep only findings a
+   * majority agree on; minority findings are surfaced as lower-confidence.
+   * Supersedes the verification pass. Needs >= 2 models to take effect.
+   */
+  readonly ensembleModels?: readonly string[];
   readonly logger: Logger;
 };
 
@@ -225,42 +238,98 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     );
   }
 
-  logger.info("Running harness", {
-    harness: req.harness.name,
-    model: req.model ?? "(harness default)",
-    reasoning: req.reasoning,
-    agentic,
-    filesInScope: files.length,
-    promptChars: systemPrompt.length + userPrompt.length,
-    cwd: harnessCwd,
-  });
-  const stdout = await req.harness.review({
-    systemPrompt,
-    userPrompt,
-    model: req.model,
-    agentic,
-    workdir: harnessCwd,
-    env: req.harnessEnv,
-    logger,
-  });
+  // Noise profile: hard-filter by severity (the prompt asks too, this enforces).
+  const keep = new Set(severitiesForProfile(profile));
 
-  const review = parseReviewOutput(stdout);
-  const validated = validateFindings(review.findings, files);
-  const dropped = validated.dropped;
+  // Run one model and return its (profile-filtered, diff-anchored) findings.
+  const produceOne = async (
+    model: string | undefined,
+  ): Promise<{
+    inline: Finding[];
+    review: ReviewOutput;
+    dropped: Finding[];
+  }> => {
+    logger.info("Running harness", {
+      harness: req.harness.name,
+      model: model ?? "(harness default)",
+      agentic,
+      filesInScope: files.length,
+      cwd: harnessCwd,
+    });
+    const stdout = await req.harness.review({
+      systemPrompt,
+      userPrompt,
+      model,
+      agentic,
+      workdir: harnessCwd,
+      env: req.harnessEnv,
+      logger,
+    });
+    const review = parseReviewOutput(stdout);
+    const validated = validateFindings(review.findings, files);
+    return {
+      inline: validated.inline.filter((f) => keep.has(f.severity)),
+      review,
+      dropped: [...validated.dropped],
+    };
+  };
+
+  const ensemble =
+    req.ensembleModels && req.ensembleModels.length >= 2
+      ? req.ensembleModels
+      : undefined;
+
+  let review: ReviewOutput;
+  let dropped: Finding[];
+  let inline: Finding[];
+  let uncertain: Finding[] = [];
+
+  if (ensemble) {
+    logger.info("Ensemble review", { models: ensemble });
+    const [firstModel, ...restModels] = ensemble;
+    const firstRun = await produceOne(firstModel);
+    const runs = [firstRun];
+    for (const model of restModels) runs.push(await produceOne(model)); // sequential
+    review = firstRun.review;
+    dropped = firstRun.dropped;
+    const merged = mergeEnsemble(
+      runs.map((r) => r.inline),
+      majority(ensemble.length),
+    );
+    inline = [...merged.confirmed];
+    uncertain = [...merged.uncertain];
+    logger.info("Ensemble merged", {
+      confirmed: inline.length,
+      uncertain: uncertain.length,
+    });
+  } else {
+    const one = await produceOne(req.model);
+    review = one.review;
+    dropped = one.dropped;
+    inline = one.inline;
+    // Verification pass: a cheap second opinion that drops false positives.
+    if (req.verify !== false && inline.length > 0) {
+      inline = await verifyInline(req, files, inline, harnessCwd);
+    }
+  }
+
   if (dropped.length > 0) {
     logger.warn("Some findings could not anchor to the diff", {
       dropped: dropped.length,
     });
   }
 
-  // Noise profile: hard-filter by severity (the prompt asks too, this enforces).
-  const keep = new Set(severitiesForProfile(profile));
-  let inline = validated.inline.filter((f) => keep.has(f.severity));
-
-  // Verification pass: a cheap second opinion that drops false positives.
-  if (req.verify !== false && inline.length > 0) {
-    inline = await verifyInline(req, files, inline, harnessCwd);
-  }
+  // Ensemble minority findings go in a collapsed lower-confidence section.
+  const uncertainNote =
+    uncertain.length > 0
+      ? `\n\n<details><summary>Lower-confidence findings (raised by a minority of models)</summary>\n\n${uncertain
+          .map((f) => `- \`${f.path}:${f.line}\` [${f.severity}] ${f.body}`)
+          .join("\n")}\n\n</details>`
+      : "";
+  const reviewForPost: ReviewOutput = {
+    ...review,
+    summary: `${review.summary}${uncertainNote}`,
+  };
 
   const requestedChanges = inline.some((f) => f.severity === "blocker");
   const verdict = requestedChanges ? "REQUEST_CHANGES" : "COMMENT";
@@ -278,12 +347,13 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       verdict,
       profile,
       inline: inline.length,
+      uncertain: uncertain.length,
       summary: review.summary,
     });
     return result;
   }
 
-  await postReview(octokit, req.ref, review, inline, dropped, logger, {
+  await postReview(octokit, req.ref, reviewForPost, inline, dropped, logger, {
     reviewerName: req.reviewerName,
     headSha: pull.headSha,
     refreshPaths,

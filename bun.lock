@@ -29,6 +29,7 @@
         "@loupe/credentials": "workspace:*",
         "@loupe/harness": "workspace:*",
         "@loupe/logger": "workspace:*",
+        "@octokit/rest": "22.0.0",
         "commander": "14.0.0",
       },
       "devDependencies": {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { commentableLines } from "../src/diff";
 import { parseReviewOutput, parseVerification } from "../src/parse";
 import { severitiesForProfile } from "../src/types";
+import { majority, mergeEnsemble } from "../src/ensemble";
 import { validateFindings } from "../src/validate";
 
 const patch = [
@@ -115,5 +116,27 @@ describe("severitiesForProfile", () => {
       "warning",
       "nit",
     ]);
+  });
+});
+
+describe("mergeEnsemble", () => {
+  const f = (path: string, line: number, severity: any = "warning") => ({
+    path,
+    line,
+    severity,
+    body: `${path}:${line}`,
+  });
+  it("confirms findings a majority of models agree on, others uncertain", () => {
+    const a = [f("x.ts", 10, "blocker"), f("y.ts", 5)];
+    const b = [f("x.ts", 11), f("z.ts", 1)]; // x.ts within 3 lines => agrees
+    const { confirmed, uncertain } = mergeEnsemble([a, b], majority(2));
+    expect(confirmed.map((c) => c.path)).toEqual(["x.ts"]);
+    expect(confirmed[0]!.severity).toBe("blocker"); // stronger rep kept
+    expect(uncertain.map((c) => c.path).sort()).toEqual(["y.ts", "z.ts"]);
+  });
+  it("majority is 2 of 2 and 2 of 3", () => {
+    expect(majority(2)).toBe(2);
+    expect(majority(3)).toBe(2);
+    expect(majority(4)).toBe(3);
   });
 });
