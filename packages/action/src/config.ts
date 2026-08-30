@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import type { ReasoningEffort } from "@loupe/core";
+import type { Profile, ReasoningEffort } from "@loupe/core";
 import {
   dotenvProvider,
   envProvider,
@@ -18,6 +18,7 @@ const envSchema = z.object({
   GITHUB_TOKEN: z.string().min(1, "GITHUB_TOKEN is required"),
   GITHUB_REPOSITORY: z.string().regex(/^[^/]+\/[^/]+$/, "expected owner/repo"),
   GITHUB_EVENT_PATH: z.string().optional(),
+  GITHUB_EVENT_NAME: z.string().optional(),
   GITHUB_WORKSPACE: z.string().optional(),
   LOUPE_PR_NUMBER: z.coerce.number().int().positive().optional(),
   LOUPE_HARNESS: z.string().default("whip"),
@@ -33,6 +34,15 @@ const envSchema = z.object({
   LOUPE_DIR: z.string().optional(),
   LOUPE_CONFIG: z.string().optional(),
   LOUPE_REVIEWER: z.string().optional(),
+  LOUPE_PROFILE: z.enum(["quiet", "chill", "assertive"]).default("chill"),
+  LOUPE_VERIFY: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
+  LOUPE_FULL: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 });
 
 export type Config = {
@@ -50,6 +60,11 @@ export type Config = {
   readonly guidance?: string;
   readonly configPath?: string;
   readonly reviewerFilter?: string;
+  readonly profile: Profile;
+  readonly verify: boolean;
+  readonly full: boolean;
+  readonly eventName?: string;
+  readonly eventPath?: string;
 };
 
 export function loadConfig(): Config {
@@ -79,6 +94,11 @@ export function loadConfig(): Config {
       : undefined,
     configPath: env.LOUPE_CONFIG ? inWorkspace(env.LOUPE_CONFIG) : undefined,
     reviewerFilter: env.LOUPE_REVIEWER,
+    profile: env.LOUPE_PROFILE,
+    verify: env.LOUPE_VERIFY,
+    full: env.LOUPE_FULL,
+    eventName: env.GITHUB_EVENT_NAME,
+    eventPath: env.GITHUB_EVENT_PATH,
   };
 }
 
@@ -89,13 +109,21 @@ function resolvePullNumber(
   if (explicit) return explicit;
   if (eventPath) {
     const event: unknown = JSON.parse(readFileSync(eventPath, "utf8"));
+    // pull_request events carry pull_request.number; issue_comment on a PR
+    // carries issue.number; pull_request_review_comment carries pull_request.
     const parsed = z
-      .object({ pull_request: z.object({ number: z.number() }) })
+      .object({
+        pull_request: z.object({ number: z.number() }).optional(),
+        issue: z.object({ number: z.number() }).optional(),
+      })
       .safeParse(event);
-    if (parsed.success) return parsed.data.pull_request.number;
+    const n = parsed.success
+      ? (parsed.data.pull_request?.number ?? parsed.data.issue?.number)
+      : undefined;
+    if (n) return n;
   }
   throw new Error(
-    "Could not determine PR number: set LOUPE_PR_NUMBER or run on a pull_request event",
+    "Could not determine PR number: set LOUPE_PR_NUMBER or run on a pull_request/comment event",
   );
 }
 

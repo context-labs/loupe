@@ -51,6 +51,9 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 | `-m, --model <name>` | `kimi-k3` | Model id passed to the harness. |
 | `-r, --reasoning <level>` | `medium` | `low` \| `medium` \| `high`. |
 | `--no-agentic` | (agentic on) | Review one-shot from the diff, no tool use. |
+| `--profile <name>` | `chill` | Noise: `quiet` \| `chill` \| `assertive`. |
+| `--no-verify` | (verify on) | Skip the verification pass. |
+| `--full` | off | Whole-PR review instead of the incremental delta. |
 | `-d, --dir <subdir>` | — | Restrict to a subdirectory (e.g. `inference`). |
 | `--config <path>` | — | `.loupe.json` reviewer profiles; runs each match. |
 | `--reviewer <name>` | — | Run only one named reviewer from `--config`. |

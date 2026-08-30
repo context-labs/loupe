@@ -36,6 +36,9 @@ whose globs match a changed file and posts each as its own labeled review
 | `model` | no | Overrides the run's model for this reviewer. |
 | `reasoning` | no | `low` \| `medium` \| `high`. |
 | `agentic` | no | `false` to run one-shot; omitted = agentic (the default). |
+| `profile` | no | Noise profile: `quiet` (blockers) \| `chill` (default) \| `assertive` (all). |
+| `verify` | no | `false` to skip the verification pass (default on). |
+| `pathInstructions` | no | `[{ glob, instruction }]` extra review instructions for matching files. |
 
 Globs are matched with `Bun.Glob` against repo-relative paths. `include` also
 composes with `--dir` (subdir scope).
@@ -77,6 +80,22 @@ review — no vendored rules. Default paths:
 `CLAUDE.md, AGENTS.md, .loupe.md, CONTRIBUTING.md` (override with `--conventions`
 or `LOUPE_CONVENTION_PATHS`). With `--dir`, paths resolve under the subdir
 (`inference/AGENTS.md`).
+
+## Signal-to-noise features
+
+- **Verification pass** (on by default) — after findings are produced, a cheap
+  second inference judges each one real or not against the diff; rejected
+  findings are dropped. Turn off with `verify: false` / `--no-verify`.
+- **Noise profile** — `quiet` posts only blockers, `chill` (default) blockers +
+  warnings, `assertive` everything. Both prompt-level and a hard severity
+  filter.
+- **Path instructions** — per-glob natural-language guidance injected only when
+  a matching file changed (e.g. "in `**/*.sql`, flag full-table locks").
+- **Incremental review** — on a re-review, loupe reviews only the files changed
+  since its last review of the PR and replaces only those comments; comments on
+  untouched files are kept. `--full` / `full: true` forces a whole-PR review.
+- **Walkthrough** — each review includes a collapsible changed-files table and,
+  when useful, a Mermaid sequence diagram.
 
 ## Severities
 

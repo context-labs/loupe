@@ -1,5 +1,6 @@
 import {
   runReview,
+  type Profile,
   type ReasoningEffort,
   type ReviewResult,
 } from "@loupe/core";
@@ -28,6 +29,10 @@ export type RunInput = {
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
   readonly agentic?: boolean;
+  readonly profile?: Profile;
+  readonly verify?: boolean;
+  readonly full?: boolean;
+  readonly pathInstructions?: readonly { glob: string; instruction: string }[];
   readonly logger: Logger;
 };
 
@@ -78,6 +83,10 @@ export async function reviewPullRequest(
     include: input.include,
     exclude: input.exclude,
     agentic: input.agentic,
+    profile: input.profile,
+    verify: input.verify,
+    full: input.full,
+    pathInstructions: input.pathInstructions,
     logger,
   });
 }

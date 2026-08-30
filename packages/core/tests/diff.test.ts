@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { commentableLines } from "../src/diff";
-import { parseReviewOutput } from "../src/parse";
+import { parseReviewOutput, parseVerification } from "../src/parse";
+import { severitiesForProfile } from "../src/types";
 import { validateFindings } from "../src/validate";
 
 const patch = [
@@ -69,6 +70,50 @@ describe("parseReviewOutput", () => {
       "warning",
       "nit",
       "warning",
+    ]);
+  });
+});
+
+describe("parseReviewOutput walkthrough/diagram", () => {
+  it("parses walkthrough items and a diagram, dropping malformed items", () => {
+    const out = parseReviewOutput(
+      JSON.stringify({
+        summary: "s",
+        findings: [],
+        walkthrough: [
+          { path: "a.ts", summary: "did a" },
+          { path: "b.ts" }, // malformed → dropped
+        ],
+        diagram: "sequenceDiagram\n A->>B: hi",
+      }),
+    );
+    expect(out.walkthrough).toEqual([{ path: "a.ts", summary: "did a" }]);
+    expect(out.diagram).toContain("sequenceDiagram");
+  });
+});
+
+describe("parseVerification", () => {
+  it("maps finding index to real verdict", () => {
+    const m = parseVerification(
+      'ok: {"verdicts":[{"index":0,"real":true},{"index":1,"real":false}]}',
+    );
+    expect(m.get(0)).toBe(true);
+    expect(m.get(1)).toBe(false);
+    expect(m.get(2)).toBeUndefined();
+  });
+  it("returns empty map on junk", () => {
+    expect(parseVerification("no json").size).toBe(0);
+  });
+});
+
+describe("severitiesForProfile", () => {
+  it("scopes severities by profile", () => {
+    expect(severitiesForProfile("quiet")).toEqual(["blocker"]);
+    expect(severitiesForProfile("chill")).toEqual(["blocker", "warning"]);
+    expect(severitiesForProfile("assertive")).toEqual([
+      "blocker",
+      "warning",
+      "nit",
     ]);
   });
 });

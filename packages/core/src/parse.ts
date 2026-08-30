@@ -1,4 +1,10 @@
-import { findingSchema, reviewOutputSchema, type ReviewOutput } from "./types";
+import {
+  findingSchema,
+  reviewOutputSchema,
+  verificationSchema,
+  walkthroughItemSchema,
+  type ReviewOutput,
+} from "./types";
 
 /**
  * Pull the review JSON out of a harness's raw stdout. CLIs wrap output in prose
@@ -21,14 +27,41 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
     );
   }
   const parsed: unknown = JSON.parse(candidate);
-  const { summary, findings } = reviewOutputSchema.parse(parsed);
-  // Validate each finding independently; drop malformed ones (e.g. missing
-  // path/line/body) rather than rejecting the entire review.
-  const valid = findings.flatMap((f) => {
+  const { summary, findings, walkthrough, diagram } =
+    reviewOutputSchema.parse(parsed);
+  // Validate each finding/walkthrough item independently; drop malformed ones
+  // rather than rejecting the entire review.
+  const validFindings = findings.flatMap((f) => {
     const result = findingSchema.safeParse(f);
     return result.success ? [result.data] : [];
   });
-  return { summary, findings: valid };
+  const validWalkthrough = walkthrough.flatMap((w) => {
+    const result = walkthroughItemSchema.safeParse(w);
+    return result.success ? [result.data] : [];
+  });
+  return {
+    summary,
+    findings: validFindings,
+    walkthrough: validWalkthrough,
+    diagram: diagram?.trim() ? diagram.trim() : undefined,
+  };
+}
+
+/** Parse the verification pass output into a map of finding index → real?. */
+export function parseVerification(stdout: string): Map<number, boolean> {
+  const map = new Map<number, boolean>();
+  const candidate = extractLastJsonObject(stdout);
+  if (!candidate) return map;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
+    return map;
+  }
+  const result = verificationSchema.safeParse(parsed);
+  if (!result.success) return map;
+  for (const v of result.data.verdicts) map.set(v.index, v.real);
+  return map;
 }
 
 /** Scan for the last top-level {...} by brace-depth, ignoring string contents. */

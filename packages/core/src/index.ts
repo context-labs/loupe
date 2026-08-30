@@ -5,17 +5,21 @@ import type { Harness } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
 
 import {
+  changedFilesBetween,
   fetchConventions,
   fetchPullContext,
+  getLastReviewedSha,
   makeOctokit,
   postReview,
   type PullRef,
 } from "./github";
-import { parseReviewOutput } from "./parse";
-import type { Finding } from "./types";
+import { parseReviewOutput, parseVerification } from "./parse";
+import { severitiesForProfile, type Finding, type Profile } from "./types";
 import {
   buildSystemPrompt,
   buildUserPrompt,
+  buildVerifySystemPrompt,
+  buildVerifyUserPrompt,
   type ReasoningEffort,
 } from "./prompt";
 import { validateFindings } from "./validate";
@@ -58,6 +62,14 @@ export type ReviewRequest = {
   readonly exclude?: readonly string[];
   /** Let the harness use tools to explore the checkout (needs a real workdir). */
   readonly agentic?: boolean;
+  /** Noise profile: quiet (blockers) | chill (default) | assertive (all). */
+  readonly profile?: Profile;
+  /** Per-glob extra review instructions applied to matching changed files. */
+  readonly pathInstructions?: readonly { glob: string; instruction: string }[];
+  /** Second-opinion verification pass to drop false positives (default true). */
+  readonly verify?: boolean;
+  /** Force a full review instead of the incremental delta since last review. */
+  readonly full?: boolean;
   readonly logger: Logger;
 };
 
@@ -105,41 +117,95 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
 
   const include = req.include?.map((g) => new Bun.Glob(g));
   const exclude = req.exclude?.map((g) => new Bun.Glob(g));
-  const files = pull.files.filter((f) => {
+  const scopedFiles = pull.files.filter((f) => {
     if (subdir && !f.path.startsWith(prefix)) return false;
     if (include && !include.some((g) => g.match(f.path))) return false;
     if (exclude && exclude.some((g) => g.match(f.path))) return false;
     return true;
   });
 
-  if (files.length === 0) {
+  const emptyResult = (summary: string): ReviewResult => ({
+    inlineCount: 0,
+    droppedCount: 0,
+    requestedChanges: false,
+    summary,
+    inline: [],
+    dropped: [],
+  });
+
+  if (scopedFiles.length === 0) {
     logger.info("No changed files in scope; nothing to review", {
       subdir: subdir ?? null,
     });
-    return {
-      inlineCount: 0,
-      droppedCount: 0,
-      requestedChanges: false,
-      summary: "No changed files in scope.",
-      inline: [],
-      dropped: [],
-    };
+    return emptyResult("No changed files in scope.");
+  }
+
+  // Incremental review: only re-review files changed since this reviewer's last
+  // review of the PR, and only replace comments on those files (comments on
+  // untouched files are kept). Full review (--full / first run) reviews all.
+  let files = scopedFiles;
+  let refreshPaths: Set<string> | undefined;
+  if (!req.full) {
+    const priorSha = await getLastReviewedSha(
+      octokit,
+      req.ref,
+      req.reviewerName,
+    );
+    if (priorSha && priorSha !== pull.headSha) {
+      try {
+        const delta = await changedFilesBetween(
+          octokit,
+          req.ref,
+          priorSha,
+          pull.headSha,
+        );
+        files = scopedFiles.filter((f) => delta.has(f.path));
+        refreshPaths = new Set(files.map((f) => f.path));
+        logger.info("Incremental review", {
+          priorSha: priorSha.slice(0, 9),
+          headSha: pull.headSha.slice(0, 9),
+          deltaInScope: files.length,
+        });
+        if (files.length === 0) {
+          logger.info(
+            "No in-scope files changed since last review; keeping prior comments",
+          );
+          return emptyResult("No in-scope changes since the last review.");
+        }
+      } catch (err) {
+        logger.warn("Incremental compare failed; doing a full review", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        files = scopedFiles;
+      }
+    }
   }
 
   // Agentic (explore the checkout with tools) is the default; a reviewer opts
   // out with agentic: false to run one-shot from the diff alone.
   const agentic = req.agentic ?? true;
+  const profile = req.profile ?? "chill";
+
+  // Per-glob instructions that apply to at least one file in scope.
+  const pathInstructions = (req.pathInstructions ?? [])
+    .filter((pi) => {
+      const g = new Bun.Glob(pi.glob);
+      return files.some((f) => g.match(f.path));
+    })
+    .map((pi) => `(${pi.glob}) ${pi.instruction}`);
 
   const systemPrompt = buildSystemPrompt({
     guidance: req.guidance,
     reasoning: req.reasoning,
     agentic,
+    profile,
   });
   const userPrompt = buildUserPrompt({
     title: pull.title,
     description: pull.description,
     files,
     conventions: conventions.text,
+    pathInstructions,
   });
 
   // The harness runs where the repo is checked out. Scope to the subdir only if
@@ -179,11 +245,21 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   });
 
   const review = parseReviewOutput(stdout);
-  const { inline, dropped } = validateFindings(review.findings, files);
+  const validated = validateFindings(review.findings, files);
+  const dropped = validated.dropped;
   if (dropped.length > 0) {
     logger.warn("Some findings could not anchor to the diff", {
       dropped: dropped.length,
     });
+  }
+
+  // Noise profile: hard-filter by severity (the prompt asks too, this enforces).
+  const keep = new Set(severitiesForProfile(profile));
+  let inline = validated.inline.filter((f) => keep.has(f.severity));
+
+  // Verification pass: a cheap second opinion that drops false positives.
+  if (req.verify !== false && inline.length > 0) {
+    inline = await verifyInline(req, files, inline, harnessCwd);
   }
 
   const requestedChanges = inline.some((f) => f.severity === "blocker");
@@ -200,20 +276,18 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   if (req.dryRun) {
     logger.info("Dry run — not posting review", {
       verdict,
+      profile,
+      inline: inline.length,
       summary: review.summary,
     });
     return result;
   }
 
-  await postReview(
-    octokit,
-    req.ref,
-    review,
-    inline,
-    dropped,
-    req.reviewerName,
-    logger,
-  );
+  await postReview(octokit, req.ref, review, inline, dropped, logger, {
+    reviewerName: req.reviewerName,
+    headSha: pull.headSha,
+    refreshPaths,
+  });
   logger.info("Posted review", {
     reviewer: req.reviewerName ?? "default",
     inline: inline.length,
@@ -222,4 +296,38 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   });
 
   return result;
+}
+
+/** Ask the harness to verify each finding against the diff; drop the ones it
+ * judges not real. One-shot (never agentic). Fail-open: on any error keep all. */
+async function verifyInline(
+  req: ReviewRequest,
+  files: readonly { path: string; patch: string | undefined }[],
+  findings: readonly Finding[],
+  harnessCwd: string,
+): Promise<Finding[]> {
+  try {
+    const stdout = await req.harness.review({
+      systemPrompt: buildVerifySystemPrompt(),
+      userPrompt: buildVerifyUserPrompt(findings, files),
+      model: req.model,
+      agentic: false,
+      workdir: harnessCwd,
+      env: req.harnessEnv,
+      logger: req.logger,
+    });
+    const verdicts = parseVerification(stdout);
+    const kept = findings.filter((_, i) => verdicts.get(i) !== false);
+    req.logger.info("Verification pass", {
+      before: findings.length,
+      after: kept.length,
+      dropped: findings.length - kept.length,
+    });
+    return kept;
+  } catch (err) {
+    req.logger.warn("Verification pass failed; keeping all findings", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [...findings];
+  }
 }

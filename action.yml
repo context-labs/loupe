@@ -44,6 +44,18 @@ inputs:
     description: "Run only this named reviewer from the config."
     required: false
     default: ""
+  profile:
+    description: "Noise profile: quiet | chill | assertive."
+    required: false
+    default: "chill"
+  verify:
+    description: "Run the second-opinion verification pass (true/false)."
+    required: false
+    default: "true"
+  full:
+    description: "Review the whole PR instead of the incremental delta (true/false)."
+    required: false
+    default: "false"
 runs:
   using: "composite"
   steps:
@@ -66,4 +78,7 @@ runs:
         LOUPE_DIR: ${{ inputs.dir }}
         LOUPE_CONFIG: ${{ inputs.config }}
         LOUPE_REVIEWER: ${{ inputs.reviewer }}
+        LOUPE_PROFILE: ${{ inputs.profile }}
+        LOUPE_VERIFY: ${{ inputs.verify }}
+        LOUPE_FULL: ${{ inputs.full }}
       run: bun run packages/action/src/main.ts

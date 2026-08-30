@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import type { ReasoningEffort } from "@loupe/core";
+import type { Profile, ReasoningEffort } from "@loupe/core";
 import { z } from "zod";
 
 /**
@@ -24,6 +24,14 @@ const reviewerSchema = z
     reasoning: z.enum(["low", "medium", "high"]).optional(),
     /** Let this reviewer use tools to explore the checkout (needs a workdir). */
     agentic: z.boolean().optional(),
+    /** Noise profile: quiet | chill | assertive. */
+    profile: z.enum(["quiet", "chill", "assertive"]).optional(),
+    /** Second-opinion verification pass to cut false positives (default true). */
+    verify: z.boolean().optional(),
+    /** Per-glob extra review instructions. */
+    pathInstructions: z
+      .array(z.object({ glob: z.string(), instruction: z.string() }))
+      .optional(),
   })
   .refine((r) => !(r.prompt && r.promptFile), {
     message: "reviewer has both prompt and promptFile; use one",
@@ -39,6 +47,9 @@ export type Reviewer = {
   readonly model?: string;
   readonly reasoning?: ReasoningEffort;
   readonly agentic?: boolean;
+  readonly profile?: Profile;
+  readonly verify?: boolean;
+  readonly pathInstructions?: readonly { glob: string; instruction: string }[];
 };
 
 /**
@@ -62,5 +73,8 @@ export function loadReviewers(configPath: string): Reviewer[] {
     model: r.model,
     reasoning: r.reasoning,
     agentic: r.agentic,
+    profile: r.profile,
+    verify: r.verify,
+    pathInstructions: r.pathInstructions,
   }));
 }

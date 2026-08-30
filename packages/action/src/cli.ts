@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-import type { ReasoningEffort } from "@loupe/core";
+import type { Profile, ReasoningEffort } from "@loupe/core";
 import { createRootLogger, shutdownLogger } from "@loupe/logger";
 import { Command } from "commander";
 
@@ -16,6 +16,13 @@ function parseReasoning(raw: string): ReasoningEffort {
   if ((REASONING as readonly string[]).includes(raw))
     return raw as ReasoningEffort;
   throw new Error(`Invalid --reasoning "${raw}". Use: ${REASONING.join(", ")}`);
+}
+
+const PROFILES: readonly Profile[] = ["quiet", "chill", "assertive"];
+
+function parseProfile(raw: string): Profile {
+  if ((PROFILES as readonly string[]).includes(raw)) return raw as Profile;
+  throw new Error(`Invalid --profile "${raw}". Use: ${PROFILES.join(", ")}`);
 }
 
 /** Parse owner/repo/number from a GitHub PR URL or an owner/repo#N shorthand. */
@@ -97,6 +104,13 @@ program
     "--no-agentic",
     "review one-shot from the diff only, instead of exploring the checkout with tools",
   )
+  .option("--profile <name>", "noise profile: quiet|chill|assertive", "chill")
+  .option("--no-verify", "skip the second-opinion verification pass")
+  .option(
+    "--full",
+    "review the whole PR instead of the incremental delta",
+    false,
+  )
   .option("--dry-run", "compute and log the review without posting it", false)
   .option("--infisical-env <env>", "Infisical environment slug")
   .option("--infisical-project <id>", "Infisical project id")
@@ -116,6 +130,9 @@ program
         config?: string;
         reviewer?: string;
         agentic: boolean;
+        profile: string;
+        verify: boolean;
+        full: boolean;
         dryRun: boolean;
         infisicalEnv?: string;
         infisicalProject?: string;
@@ -141,6 +158,8 @@ program
           }),
           subdir: opts.dir,
           dryRun: opts.dryRun,
+          verify: opts.verify,
+          full: opts.full,
         };
 
         if (opts.config) {
@@ -165,6 +184,9 @@ program
               agentic: r.agentic ?? opts.agentic,
               model: r.model ?? opts.model,
               reasoning: parseReasoning(r.reasoning ?? opts.reasoning),
+              profile: r.profile ?? parseProfile(opts.profile),
+              verify: r.verify ?? opts.verify,
+              pathInstructions: r.pathInstructions,
               logger,
             });
             logger.info(`[${r.name}] ${formatResult(result)}`);
@@ -178,6 +200,7 @@ program
           agentic: opts.agentic,
           model: opts.model,
           reasoning: parseReasoning(opts.reasoning),
+          profile: parseProfile(opts.profile),
           guidance: opts.promptFile
             ? readFileSync(opts.promptFile, "utf8")
             : undefined,

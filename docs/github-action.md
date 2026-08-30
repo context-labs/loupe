@@ -39,12 +39,38 @@ See `.github/workflows/review.example.yml` for whip / claude / custom-prompt
 variants. The live monorepo wiring is `inference/.loupe/` + the
 `inference--loupe-review.yml` workflow.
 
+## Chat: `@loupe` in PR comments
+
+Add a second job triggered by comment events so people can talk to loupe:
+
+```yaml
+on:
+  issue_comment: { types: [created] }
+  pull_request_review_comment: { types: [created] }
+jobs:
+  chat:
+    if: >-
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, '@loupe')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: context-labs/loupe@v0
+        with: { harness: whip, config: .loupe.json }
+        env: { INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }} }
+```
+
+Commands: `@loupe review` (re-review the whole PR), `@loupe <question>` (answer
+grounded in the diff), `@loupe help`. loupe auto-detects the comment event and
+switches to chat mode; a comment without `@loupe` is ignored.
+
 ## Inputs
 
-`harness`, `model`, `reasoning`, `prompt-file`, `config`, `reviewer`, `dir`,
-`convention-paths`, `credential-providers`, `github-token`. Each maps to a
-`LOUPE_*` env var (see below); config/prompt paths resolve against
-`GITHUB_WORKSPACE` (the checkout), not the action's own directory.
+`harness`, `model`, `reasoning`, `profile`, `verify`, `full`, `prompt-file`,
+`config`, `reviewer`, `dir`, `convention-paths`, `credential-providers`,
+`github-token`. Each maps to a `LOUPE_*` env var (see below); config/prompt
+paths resolve against `GITHUB_WORKSPACE` (the checkout), not the action's own
+directory.
 
 ## Env vars
 
@@ -53,7 +79,9 @@ The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
 `LOUPE_PR_NUMBER`, `LOUPE_HARNESS`, `LOUPE_MODEL`, `LOUPE_REASONING`,
 `LOUPE_PROMPT_FILE`, `LOUPE_CONFIG`, `LOUPE_REVIEWER`, `LOUPE_DIR`,
 `LOUPE_CONVENTION_PATHS`, `LOUPE_CREDENTIAL_PROVIDERS`, `LOUPE_INFISICAL_ENV`,
-`LOUPE_INFISICAL_PROJECT_ID`.
+`LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`.
+Comment/chat mode is auto-detected from `GITHUB_EVENT_NAME` (`issue_comment` /
+`pull_request_review_comment`), which the runner sets.
 
 ## Private-repo action access
 
