@@ -94,9 +94,8 @@ program
   )
   .option("--reviewer <name>", "run only this named reviewer from --config")
   .option(
-    "--agentic",
-    "let the harness use tools to inspect the checkout (needs --workdir at a checkout)",
-    false,
+    "--no-agentic",
+    "review one-shot from the diff only, instead of exploring the checkout with tools",
   )
   .option("--dry-run", "compute and log the review without posting it", false)
   .option("--infisical-env <env>", "Infisical environment slug")

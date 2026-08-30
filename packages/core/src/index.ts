@@ -126,10 +126,14 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     };
   }
 
+  // Agentic (explore the checkout with tools) is the default; a reviewer opts
+  // out with agentic: false to run one-shot from the diff alone.
+  const agentic = req.agentic ?? true;
+
   const systemPrompt = buildSystemPrompt({
     guidance: req.guidance,
     reasoning: req.reasoning,
-    agentic: req.agentic,
+    agentic,
   });
   const userPrompt = buildUserPrompt({
     title: pull.title,
@@ -148,9 +152,9 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       ? req.workdir
       : process.cwd();
 
-  if (req.agentic && !existsSync(scoped)) {
+  if (agentic && !existsSync(scoped)) {
     logger.warn(
-      "Agentic review has no matching checkout on disk; the agent can't inspect real files. Pass --workdir pointing at a checkout.",
+      "Agentic review has no matching checkout on disk; the agent can't inspect real files. Pass --workdir pointing at a checkout, or set agentic: false.",
       { scoped, fallbackCwd: harnessCwd },
     );
   }
@@ -159,7 +163,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     harness: req.harness.name,
     model: req.model ?? "(harness default)",
     reasoning: req.reasoning,
-    agentic: req.agentic ?? false,
+    agentic,
     filesInScope: files.length,
     promptChars: systemPrompt.length + userPrompt.length,
     cwd: harnessCwd,
@@ -168,7 +172,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     systemPrompt,
     userPrompt,
     model: req.model,
-    agentic: req.agentic,
+    agentic,
     workdir: harnessCwd,
     env: req.harnessEnv,
     logger,
