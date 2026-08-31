@@ -1,6 +1,7 @@
 import { jsonrepair } from "jsonrepair";
 
 import {
+  concernSchema,
   findingSchema,
   reviewOutputSchema,
   verificationSchema,
@@ -45,22 +46,24 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
   }
   const candidate = extractLastJsonObject(stdout) ?? stdout.slice(start);
   const parsed: unknown = parseLenient(candidate);
-  const { summary, findings, walkthrough, diagram } =
+  const { summary, findings, walkthrough, concerns, highlights, diagram } =
     reviewOutputSchema.parse(parsed);
-  // Validate each finding/walkthrough item independently; drop malformed ones
-  // rather than rejecting the entire review.
-  const validFindings = findings.flatMap((f) => {
-    const result = findingSchema.safeParse(f);
-    return result.success ? [result.data] : [];
-  });
-  const validWalkthrough = walkthrough.flatMap((w) => {
-    const result = walkthroughItemSchema.safeParse(w);
-    return result.success ? [result.data] : [];
-  });
+  // Validate each item independently; drop malformed ones rather than rejecting
+  // the entire review.
+  const pick = <T>(
+    items: unknown[],
+    schema: { safeParse: (x: unknown) => { success: boolean; data?: T } },
+  ): T[] =>
+    items.flatMap((i) => {
+      const r = schema.safeParse(i);
+      return r.success && r.data !== undefined ? [r.data] : [];
+    });
   return {
     summary,
-    findings: validFindings,
-    walkthrough: validWalkthrough,
+    findings: pick(findings, findingSchema),
+    walkthrough: pick(walkthrough, walkthroughItemSchema),
+    concerns: pick(concerns, concernSchema),
+    highlights: highlights.map((h) => h.trim()).filter(Boolean),
     diagram: diagram?.trim() ? diagram.trim() : undefined,
   };
 }

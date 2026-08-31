@@ -46,7 +46,15 @@ const OUTPUT_CONTRACT = `
 Respond with ONE JSON object and NOTHING else — no prose, no code fences.
 Schema:
 {
-  "summary": "<2-4 sentence overall assessment>",
+  "summary": "<2-4 sentence overall assessment: what this PR does and your verdict>",
+  "concerns": [
+    {
+      "title": "<short title of a PR-level concern not tied to one line>",
+      "detail": "<why it matters and what to do>",
+      "severity": "blocker" | "warning" | "nit"
+    }
+  ],
+  "highlights": ["<something done well, brief; optional>"],
   "walkthrough": [
     { "path": "<changed file>", "summary": "<one line: what changed here and why it matters>" }
   ],
@@ -56,14 +64,16 @@ Schema:
       "path": "<repo-relative file path, exactly as shown in the diff>",
       "line": <line number in the NEW version of the file; must be a changed or context line shown in the diff>,
       "severity": "blocker" | "warning" | "nit",
-      "body": "<specific, actionable comment>"
+      "body": "<specific, actionable comment about THIS line>"
     }
   ]
 }
-Only comment on lines that appear in the diff. Do not invent line numbers.
-Include a walkthrough entry for each substantive changed file. Omit "diagram"
-unless the PR has a control/data flow worth drawing.
-Return findings: [] if nothing is worth flagging.`.trim();
+Use "findings" for issues you can pin to a specific changed line (they become
+inline review comments) — always give the line number from the diff. Use
+"concerns" for cross-cutting or PR-level issues that don't map to one line.
+Include a walkthrough entry for each substantive changed file. Keep "highlights"
+short and only when genuinely warranted. Omit "diagram" unless there's a
+control/data flow worth drawing. Return empty arrays when a section is empty.`.trim();
 
 const PROFILE_DIRECTIVE: Record<Profile, string> = {
   quiet:

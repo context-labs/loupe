@@ -351,7 +351,9 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     summary: `${review.summary}${uncertainNote}`,
   };
 
-  const requestedChanges = inline.some((f) => f.severity === "blocker");
+  const requestedChanges = [...inline, ...review.concerns].some(
+    (f) => f.severity === "blocker",
+  );
   const verdict = requestedChanges ? "REQUEST_CHANGES" : "COMMENT";
   const result: ReviewResult = {
     inlineCount: inline.length,
@@ -377,6 +379,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     reviewerName: req.reviewerName,
     headSha: pull.headSha,
     refreshPaths,
+    fileCount: files.length,
   });
   logger.info("Posted review", {
     reviewer: req.reviewerName ?? "default",

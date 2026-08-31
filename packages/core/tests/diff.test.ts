@@ -158,3 +158,32 @@ describe("parseReviewOutput resilience (jsonrepair)", () => {
     expect(out.summary).toBe("s");
   });
 });
+
+describe("validateFindings snapping", () => {
+  const files = [{ path: "src/x.ts", patch }]; // commentable RIGHT lines: 1..4
+  it("snaps an off-by-a-few finding to the nearest commentable line", () => {
+    const { inline, dropped } = validateFindings(
+      [{ path: "src/x.ts", line: 7, severity: "warning", body: "near" }],
+      files,
+    );
+    expect(dropped).toHaveLength(0);
+    expect(inline).toHaveLength(1);
+    expect(inline[0]!.line).toBe(4); // snapped from 7 to nearest (4)
+  });
+  it("drops a finding with no commentable line within the window", () => {
+    const { inline, dropped } = validateFindings(
+      [{ path: "src/x.ts", line: 500, severity: "nit", body: "far" }],
+      files,
+    );
+    expect(inline).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+  });
+  it("drops a finding on a file not in the diff", () => {
+    const { inline, dropped } = validateFindings(
+      [{ path: "other.ts", line: 1, severity: "nit", body: "x" }],
+      files,
+    );
+    expect(inline).toHaveLength(0);
+    expect(dropped).toHaveLength(1);
+  });
+});

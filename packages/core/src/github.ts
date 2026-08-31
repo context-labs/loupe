@@ -152,12 +152,6 @@ export async function fetchConventions(
   return { text: parts.join("\n\n---\n\n"), found };
 }
 
-const SEVERITY_LABEL: Record<Finding["severity"], string> = {
-  blocker: "🔴 blocker",
-  warning: "🟡 warning",
-  nit: "🔵 nit",
-};
-
 /** Per-reviewer marker prefix; the sha is appended per run. Comments and the
  * review body carry it so a later run can find and clean up its own output. */
 function markerPrefix(reviewerName: string | undefined): string {
@@ -209,9 +203,62 @@ async function deletePriorComments(
   }
 }
 
-/** Render the walkthrough table + optional Mermaid diagram for the review body. */
-function renderWalkthrough(review: ReviewOutput): string {
-  const parts: string[] = [];
+const SEV_EMOJI: Record<Finding["severity"], string> = {
+  blocker: "🔴",
+  warning: "🟡",
+  nit: "🔵",
+};
+
+/** One-line severity tally across inline findings + PR-level concerns. */
+function statLine(
+  inline: readonly Finding[],
+  review: ReviewOutput,
+  fileCount: number,
+): string {
+  const all = [...inline, ...review.concerns];
+  const n = (s: Finding["severity"]): number =>
+    all.filter((f) => f.severity === s).length;
+  const bits: string[] = [];
+  if (n("blocker")) bits.push(`🔴 ${n("blocker")}`);
+  if (n("warning")) bits.push(`🟡 ${n("warning")}`);
+  if (n("nit")) bits.push(`🔵 ${n("nit")}`);
+  if (bits.length === 0) bits.push("✅ no issues");
+  bits.push(`${fileCount} file${fileCount === 1 ? "" : "s"}`);
+  return bits.join(" · ");
+}
+
+/** Assemble the rich Markdown review body from the structured review output. */
+function renderReviewBody(
+  title: string,
+  stats: string,
+  review: ReviewOutput,
+  inline: readonly Finding[],
+  dropped: readonly Finding[],
+  tag: string,
+): string {
+  const parts: string[] = [`### 🔍 ${title}\n\n${stats}`];
+  if (review.summary.trim()) parts.push(review.summary.trim());
+
+  if (review.concerns.length > 0) {
+    parts.push(
+      `#### Concerns\n${review.concerns
+        .map(
+          (c) =>
+            `- ${SEV_EMOJI[c.severity]} **${c.title}** — ${c.detail.replace(/\n/g, " ")}`,
+        )
+        .join("\n")}`,
+    );
+  }
+  if (review.highlights.length > 0) {
+    parts.push(
+      `#### Highlights\n${review.highlights.map((h) => `- ✅ ${h}`).join("\n")}`,
+    );
+  }
+  if (inline.length > 0) {
+    parts.push(
+      `_${inline.length} inline comment${inline.length === 1 ? "" : "s"} on the diff below._`,
+    );
+  }
   if (review.walkthrough.length > 0) {
     const rows = review.walkthrough
       .map((w) => `| \`${w.path}\` | ${w.summary.replace(/\n/g, " ")} |`)
@@ -223,7 +270,18 @@ function renderWalkthrough(review: ReviewOutput): string {
   if (review.diagram) {
     parts.push("```mermaid\n" + review.diagram + "\n```");
   }
-  return parts.length > 0 ? `\n\n${parts.join("\n\n")}` : "";
+  if (dropped.length > 0) {
+    parts.push(
+      `<details><summary>Other notes (${dropped.length})</summary>\n\n${dropped
+        .map(
+          (f) =>
+            `- ${SEV_EMOJI[f.severity]} \`${f.path}:${f.line}\` — ${f.body.replace(/\n/g, " ")}`,
+        )
+        .join("\n")}\n\n</details>`,
+    );
+  }
+  parts.push(tag);
+  return parts.join("\n\n");
 }
 
 /**
@@ -239,6 +297,8 @@ export type PostReviewOptions = {
   readonly headSha: string;
   /** Incremental review: only replace prior comments on these files. */
   readonly refreshPaths?: ReadonlySet<string>;
+  /** Files in scope, for the stat line. */
+  readonly fileCount: number;
 };
 
 export async function postReview(
@@ -258,25 +318,23 @@ export async function postReview(
     opts.refreshPaths,
   );
 
-  const hasBlocker = inline.some((f) => f.severity === "blocker");
-  const droppedNote =
-    dropped.length > 0
-      ? `\n\n**Additional notes (could not anchor to the diff):**\n` +
-        dropped.map((f) => `- \`${f.path}:${f.line}\` — ${f.body}`).join("\n")
-      : "";
+  const hasBlocker = [...inline, ...review.concerns].some(
+    (f) => f.severity === "blocker",
+  );
   const title = opts.reviewerName
     ? `loupe · ${opts.reviewerName}`
     : "loupe review";
   const tag = makeMarker(opts.reviewerName, opts.headSha);
+  const stats = statLine(inline, review, opts.fileCount);
 
   await octokit.pulls.createReview({
     ...ref,
     event: hasBlocker ? "REQUEST_CHANGES" : "COMMENT",
-    body: `🔍 **${title}**\n\n${review.summary}${renderWalkthrough(review)}${droppedNote}\n\n${tag}`,
+    body: renderReviewBody(title, stats, review, inline, dropped, tag),
     comments: inline.map((f) => ({
       path: f.path,
       line: f.line,
-      body: `**${SEVERITY_LABEL[f.severity]}** ${f.body}\n\n${tag}`,
+      body: `${SEV_EMOJI[f.severity]} **${f.severity}** ${f.body}\n\n${tag}`,
     })),
   });
 }

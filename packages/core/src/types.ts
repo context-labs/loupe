@@ -53,6 +53,14 @@ export const walkthroughItemSchema = z.object({
 });
 export type WalkthroughItem = z.infer<typeof walkthroughItemSchema>;
 
+/** A major, PR-level callout that isn't tied to a single diff line. */
+export const concernSchema = z.object({
+  title: z.string(),
+  detail: z.string(),
+  severity: severitySchema,
+});
+export type Concern = z.infer<typeof concernSchema>;
+
 /**
  * The harness's JSON: a summary, findings, and optional walkthrough material.
  * Findings and walkthrough items are validated individually by the parser so one
@@ -62,6 +70,8 @@ export const reviewOutputSchema = z.object({
   summary: z.string().default(""),
   findings: z.array(z.unknown()).default([]),
   walkthrough: z.array(z.unknown()).default([]),
+  concerns: z.array(z.unknown()).default([]),
+  highlights: z.array(z.string()).default([]),
   // Optional Mermaid sequence diagram (body only, no fences).
   diagram: z.string().optional(),
 });
@@ -69,6 +79,8 @@ export type ReviewOutput = {
   readonly summary: string;
   readonly findings: readonly Finding[];
   readonly walkthrough: readonly WalkthroughItem[];
+  readonly concerns: readonly Concern[];
+  readonly highlights: readonly string[];
   readonly diagram?: string;
 };
 

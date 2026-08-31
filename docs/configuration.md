@@ -102,6 +102,19 @@ or `LOUPE_CONVENTION_PATHS`). With `--dir`, paths resolve under the subdir
 - **Walkthrough** — each review includes a collapsible changed-files table and,
   when useful, a Mermaid sequence diagram.
 
+## What a review looks like
+
+loupe posts a real GitHub **review** (not a plain comment): a structured body
+plus inline, line-anchored comments.
+
+- **Body** — a stat line (🔴/🟡/🔵 counts · files), the summary, a **Concerns**
+  section (PR-level callouts not tied to a line), optional **Highlights**, a
+  collapsible **Walkthrough** table, an optional Mermaid diagram, and an "Other
+  notes" section for findings that couldn't be anchored.
+- **Inline comments** — one per `finding`, on the exact diff line. If the model's
+  line is a few off (common in agentic mode), loupe **snaps it to the nearest
+  commentable line** rather than demoting it to a note, so findings land inline.
+
 ## Severities
 
 Findings use `blocker` \| `warning` \| `nit`. Models often emit off-scale values
