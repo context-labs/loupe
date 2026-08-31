@@ -8,18 +8,21 @@ inputs:
     description: "Token used to read the PR and post the review."
     required: true
     default: ${{ github.token }}
+  # harness/model/reasoning/profile/timezone/dir default to empty so a value in
+  # .loupe.json wins; set an input here only to override the file. Built-in
+  # fallbacks (whip / kimi-k3 / low / chill / UTC) apply when neither is set.
   harness:
-    description: "Which agent CLI to review with (whip, claude, codex)."
+    description: "Which agent CLI to review with (whip, claude, codex). Overrides .loupe.json; default whip."
     required: false
-    default: "whip"
+    default: ""
   model:
-    description: "Model id for the harness (e.g. kimi-k3, claude-opus-4-8)."
+    description: "Model id for the harness (e.g. kimi-k3, claude-opus-4-8). Overrides .loupe.json; default kimi-k3."
     required: false
-    default: "kimi-k3"
+    default: ""
   reasoning:
-    description: "Reasoning effort: low, medium, or high."
+    description: "Reasoning effort: low, medium, or high. Overrides .loupe.json; default low."
     required: false
-    default: "low"
+    default: ""
   prompt-file:
     description: "Path to a custom reviewer-guidance file (output contract still enforced)."
     required: false
@@ -33,7 +36,7 @@ inputs:
     required: false
     default: "CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md"
   dir:
-    description: "Restrict the review to a repo subdirectory (e.g. inference)."
+    description: "Restrict the review to a repo subdirectory (e.g. inference). Overrides .loupe.json."
     required: false
     default: ""
   config:
@@ -45,9 +48,9 @@ inputs:
     required: false
     default: ""
   profile:
-    description: "Noise profile: quiet | chill | assertive."
+    description: "Noise profile: quiet | chill | assertive. Overrides .loupe.json; default chill."
     required: false
-    default: "chill"
+    default: ""
   verify:
     description: "Run the second-opinion verification pass (true/false)."
     required: false
@@ -65,9 +68,9 @@ inputs:
     required: false
     default: ""
   timezone:
-    description: "Timezone label for the review environment line (e.g. PST)."
+    description: "Timezone label for the review environment line (e.g. PST). Overrides .loupe.json; default UTC."
     required: false
-    default: "UTC"
+    default: ""
 runs:
   using: "composite"
   steps:

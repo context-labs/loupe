@@ -108,6 +108,42 @@ Per-reviewer keys: `prompt`/`promptFile`, `include`/`exclude`, `model`,
 `reasoning`, `profile`, `agentic`, `verify`, `ensemble`, `skills`,
 `pathInstructions`. Top-level `skills` apply to every reviewer.
 
+### Top-level config — keep review policy out of the workflow
+
+The config file also carries the **review defaults** that used to be repeated in
+every workflow file: `harness`, `model`, `reasoning`, `profile`, `timezone`, and
+`dir`. Precedence is **Action input / CLI flag → `.loupe.json` → built-in
+default**, so a workflow can still override, but by default the policy lives with
+the repo.
+
+It can also declare the **whip provider + model panel** under `whip`, so the
+workflow no longer hand-writes `~/.whip/config.json` in a CI step. loupe
+materializes it into a throwaway `WHIP_HOME` at review time (never touching a
+developer's real `~/.whip`); only the API key *value* stays in the workflow —
+its env-var name is in the config.
+
+```json
+{
+  "harness": "whip",
+  "model": "kimi-k3",
+  "timezone": "PST",
+  "dir": "inference",
+  "whip": {
+    "provider": {
+      "name": "inference-net",
+      "baseUrl": "https://api.inference.net/v1",
+      "apiKeyEnv": "INFERENCE_API_KEY"
+    },
+    "models": ["kimi-k3", "glm-5.3-flash", "gpt-5.6-luna"]
+  },
+  "reviewers": [{ "name": "bugs", "promptFile": "reviewers/bugs.md" }]
+}
+```
+
+With that, the whole workflow is just: checkout → install the harness binary →
+`context-labs/loupe@v0` with `config: .loupe.json` and the secret in `env`. See
+Variant D in `.github/workflows/review.example.yml`.
+
 ```bash
 loupe review owner/repo#123 --config .loupe.json
 loupe review owner/repo#123 --config .loupe.json --reviewer migrations
