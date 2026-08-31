@@ -1,3 +1,5 @@
+import { jsonrepair } from "jsonrepair";
+
 import {
   findingSchema,
   reviewOutputSchema,
@@ -5,6 +7,19 @@ import {
   walkthroughItemSchema,
   type ReviewOutput,
 } from "./types";
+
+/**
+ * Parse JSON, repairing LLM-malformed output (truncation, unescaped chars in
+ * freeform strings, trailing commas) rather than throwing. Models routinely emit
+ * *almost* valid JSON; a strict parse would drop the whole review.
+ */
+function parseLenient(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return JSON.parse(jsonrepair(text));
+  }
+}
 
 /**
  * Pull the review JSON out of a harness's raw stdout. CLIs wrap output in prose
@@ -20,13 +35,16 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
         "LOG_LEVEL=debug to see the harness stdout/stderr.",
     );
   }
-  const candidate = extractLastJsonObject(stdout);
-  if (!candidate) {
+  // Prefer the last balanced {...}; if none closes (truncated output), fall back
+  // to everything from the first "{" so jsonrepair can complete it.
+  const start = stdout.indexOf("{");
+  if (start === -1) {
     throw new Error(
       `No JSON object found in harness output:\n${stdout.slice(0, 1000)}`,
     );
   }
-  const parsed: unknown = JSON.parse(candidate);
+  const candidate = extractLastJsonObject(stdout) ?? stdout.slice(start);
+  const parsed: unknown = parseLenient(candidate);
   const { summary, findings, walkthrough, diagram } =
     reviewOutputSchema.parse(parsed);
   // Validate each finding/walkthrough item independently; drop malformed ones
@@ -54,7 +72,7 @@ export function parseVerification(stdout: string): Map<number, boolean> {
   if (!candidate) return map;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(candidate);
+    parsed = parseLenient(candidate);
   } catch {
     return map;
   }

@@ -140,3 +140,21 @@ describe("mergeEnsemble", () => {
     expect(majority(4)).toBe(3);
   });
 });
+
+describe("parseReviewOutput resilience (jsonrepair)", () => {
+  it("recovers a truncated review instead of throwing", () => {
+    // Missing closing braces/brackets (model hit a token limit).
+    const truncated =
+      '{"summary":"looks ok","findings":[{"path":"a.ts","line":1,"severity":"blocker","body":"boom"}';
+    const out = parseReviewOutput(truncated);
+    expect(out.summary).toBe("looks ok");
+    expect(out.findings).toHaveLength(1);
+    expect(out.findings[0]!.path).toBe("a.ts");
+  });
+  it("recovers JSON with a trailing comma", () => {
+    const out = parseReviewOutput(
+      '{"summary":"s","findings":[],"walkthrough":[],}',
+    );
+    expect(out.summary).toBe("s");
+  });
+});
