@@ -84,8 +84,10 @@ You HAVE repository access: the full checkout is your working directory and you
 may use your tools to read files. Use them deliberately to assess real-world
 impact — inspect the actual schema/table definitions, related migrations, model
 and query code, and existing indexes/constraints the diff interacts with. Ground
-each finding in what you actually found in the codebase, not just the diff. When
-you are done investigating, respond with ONLY the final JSON object.`.trim();
+each finding in what you actually found in the codebase, not just the diff.
+Be efficient: make a handful of targeted lookups, not an exhaustive crawl. As
+soon as you can review the diff confidently, STOP using tools and respond with
+ONLY the final JSON object — do not keep exploring.`.trim();
 
 const REASONING_NOTE: Record<ReasoningEffort, string> = {
   low: "Reasoning effort: low. Do a quick pass; flag only obvious, high-confidence issues.",

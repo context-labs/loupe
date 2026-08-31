@@ -256,15 +256,35 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       filesInScope: files.length,
       cwd: harnessCwd,
     });
-    const stdout = await req.harness.review({
-      systemPrompt,
-      userPrompt,
-      model,
-      agentic,
-      workdir: harnessCwd,
-      env: req.harnessEnv,
-      logger,
-    });
+    const run = (useAgentic: boolean): Promise<string> =>
+      req.harness.review({
+        systemPrompt: useAgentic
+          ? systemPrompt
+          : buildSystemPrompt({
+              guidance: req.guidance,
+              reasoning: req.reasoning,
+              agentic: false,
+              profile,
+            }),
+        userPrompt,
+        model,
+        agentic: useAgentic,
+        workdir: harnessCwd,
+        env: req.harnessEnv,
+        logger,
+      });
+    let stdout: string;
+    try {
+      stdout = await run(agentic);
+    } catch (err) {
+      // Agentic runs can run away (hit the tool-turn cap) or otherwise fail;
+      // fall back to a one-shot diff-only review so we still post something.
+      if (!agentic) throw err;
+      logger.warn("Agentic review failed; retrying one-shot from the diff", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      stdout = await run(false);
+    }
     const review = parseReviewOutput(stdout);
     const validated = validateFindings(review.findings, files);
     return {
