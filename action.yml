@@ -19,7 +19,7 @@ inputs:
   reasoning:
     description: "Reasoning effort: low, medium, or high."
     required: false
-    default: "medium"
+    default: "low"
   prompt-file:
     description: "Path to a custom reviewer-guidance file (output contract still enforced)."
     required: false

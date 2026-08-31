@@ -70,11 +70,7 @@ program
   .argument("<pr>", "PR URL (github.com/owner/repo/pull/N) or owner/repo#N")
   .option("-H, --harness <name>", "agent CLI to review with", "whip")
   .option("-m, --model <name>", "model id for the harness", "kimi-k3")
-  .option(
-    "-r, --reasoning <level>",
-    "reasoning effort: low|medium|high",
-    "medium",
-  )
+  .option("-r, --reasoning <level>", "reasoning effort: low|medium|high", "low")
   .option(
     "--prompt-file <path>",
     "custom reviewer guidance replacing the default (output contract still enforced)",

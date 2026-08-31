@@ -23,7 +23,7 @@ const envSchema = z.object({
   LOUPE_PR_NUMBER: z.coerce.number().int().positive().optional(),
   LOUPE_HARNESS: z.string().default("whip"),
   LOUPE_MODEL: z.string().default("kimi-k3"),
-  LOUPE_REASONING: z.enum(["low", "medium", "high"]).default("medium"),
+  LOUPE_REASONING: z.enum(["low", "medium", "high"]).default("low"),
   LOUPE_PROMPT_FILE: z.string().optional(),
   LOUPE_CONVENTION_PATHS: z
     .string()
