@@ -54,7 +54,7 @@ export async function runReviews(
         ensembleModels:
           r.ensemble ??
           (config.ensembleModels.length ? config.ensembleModels : undefined),
-        skills: r.skills ?? (config.skills.length ? config.skills : undefined),
+        skills: [...new Set([...(r.skills ?? []), ...config.skills])],
         logger,
       });
       logger.info(`[${r.name}] ${formatResult(result)}`);

@@ -41,7 +41,11 @@ const reviewerSchema = z
     message: "reviewer has both prompt and promptFile; use one",
   });
 
-const configSchema = z.object({ reviewers: z.array(reviewerSchema).min(1) });
+const configSchema = z.object({
+  reviewers: z.array(reviewerSchema).min(1),
+  /** Skills applied to every reviewer (merged with each reviewer's own). */
+  skills: z.array(z.string()).optional(),
+});
 
 export type Reviewer = {
   readonly name: string;
@@ -67,6 +71,7 @@ export function loadReviewers(configPath: string): Reviewer[] {
   const raw: unknown = JSON.parse(readFileSync(configPath, "utf8"));
   const config = configSchema.parse(raw);
   const dir = dirname(configPath);
+  const topSkills = config.skills ?? [];
   return config.reviewers.map((r) => ({
     name: r.name,
     guidance:
@@ -83,6 +88,7 @@ export function loadReviewers(configPath: string): Reviewer[] {
     verify: r.verify,
     pathInstructions: r.pathInstructions,
     ensemble: r.ensemble,
-    skills: r.skills,
+    // Top-level skills apply to every reviewer, plus any reviewer-specific ones.
+    skills: [...new Set([...topSkills, ...(r.skills ?? [])])],
   }));
 }

@@ -75,20 +75,22 @@ describe("parseReviewOutput", () => {
   });
 });
 
-describe("parseReviewOutput walkthrough/diagram", () => {
-  it("parses walkthrough items and a diagram, dropping malformed items", () => {
+describe("parseReviewOutput concerns/diagram", () => {
+  it("parses concerns and a diagram, dropping malformed concerns", () => {
     const out = parseReviewOutput(
       JSON.stringify({
         summary: "s",
         findings: [],
-        walkthrough: [
-          { path: "a.ts", summary: "did a" },
-          { path: "b.ts" }, // malformed → dropped
+        concerns: [
+          { title: "risk", detail: "watch out", severity: "warning" },
+          { title: "bad" }, // malformed (no detail) → dropped
         ],
         diagram: "sequenceDiagram\n A->>B: hi",
       }),
     );
-    expect(out.walkthrough).toEqual([{ path: "a.ts", summary: "did a" }]);
+    expect(out.concerns).toEqual([
+      { title: "risk", detail: "watch out", severity: "warning" },
+    ]);
     expect(out.diagram).toContain("sequenceDiagram");
   });
 });

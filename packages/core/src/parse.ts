@@ -5,7 +5,6 @@ import {
   findingSchema,
   reviewOutputSchema,
   verificationSchema,
-  walkthroughItemSchema,
   type ReviewOutput,
 } from "./types";
 
@@ -46,7 +45,7 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
   }
   const candidate = extractLastJsonObject(stdout) ?? stdout.slice(start);
   const parsed: unknown = parseLenient(candidate);
-  const { summary, findings, walkthrough, concerns, highlights, diagram } =
+  const { summary, findings, concerns, highlights, diagram } =
     reviewOutputSchema.parse(parsed);
   // Validate each item independently; drop malformed ones rather than rejecting
   // the entire review.
@@ -61,7 +60,6 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
   return {
     summary,
     findings: pick(findings, findingSchema),
-    walkthrough: pick(walkthrough, walkthroughItemSchema),
     concerns: pick(concerns, concernSchema),
     highlights: highlights.map((h) => h.trim()).filter(Boolean),
     diagram: diagram?.trim() ? diagram.trim() : undefined,

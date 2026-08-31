@@ -259,14 +259,6 @@ function renderReviewBody(
       `_${inline.length} inline comment${inline.length === 1 ? "" : "s"} on the diff below._`,
     );
   }
-  if (review.walkthrough.length > 0) {
-    const rows = review.walkthrough
-      .map((w) => `| \`${w.path}\` | ${w.summary.replace(/\n/g, " ")} |`)
-      .join("\n");
-    parts.push(
-      `<details><summary>Walkthrough (${review.walkthrough.length} file${review.walkthrough.length === 1 ? "" : "s"})</summary>\n\n| File | Change |\n|---|---|\n${rows}\n\n</details>`,
-    );
-  }
   if (review.diagram) {
     parts.push("```mermaid\n" + review.diagram + "\n```");
   }

@@ -63,10 +63,7 @@ Schema:
     }
   ],
   "highlights": ["<one short clause; only if genuinely notable; usually omit>"],
-  "walkthrough": [
-    { "path": "<changed file>", "summary": "<one short line: what changed>" }
-  ],
-  "diagram": "<optional Mermaid sequence diagram body (no code fences); omit unless a control/data flow is worth drawing>",
+  "diagram": "<optional Mermaid diagram body (no code fences); ONLY for a genuinely complex new control/data flow; usually omit>",
   "findings": [
     {
       "path": "<repo-relative file path, exactly as shown in the diff>",

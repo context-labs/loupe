@@ -85,12 +85,27 @@ or `LOUPE_CONVENTION_PATHS`). With `--dir`, paths resolve under the subdir
 
 ## Skills
 
-A reviewer can load repo skill docs into its own behavior via `skills` (config)
-or `--skills` (CLI): each entry is a path (relative to the checkout) to a
-`SKILL.md` or a skill directory. loupe reads them and folds them into the system
-prompt — so, for example, `[".agents/skills/i-have-adhd"]` makes the reviewer
-adopt that terse output style. This is how you enhance the underlying agent
-harness with your repo's own skills.
+Load your repo's skill docs into the reviewer. Each entry is a path (relative to
+the checkout) to a `SKILL.md` or a skill directory; loupe reads them and folds
+them into the system prompt. This is how you enhance the underlying agent harness
+with your repo's own skills — the skills live in the **consuming repo**, not in
+loupe.
+
+Two scopes:
+- **Top-level `skills`** in `.loupe.json` — applied to **every** reviewer.
+- **Per-reviewer `skills`** — added on top for one reviewer. `--skills` /
+  `LOUPE_SKILLS` add more at the CLI/Action level. All sources are merged.
+
+```json
+{
+  "skills": [".agents/skills/i-have-adhd"],
+  "reviewers": [
+    { "name": "code", "promptFile": "reviewers/bugs.md" },
+    { "name": "migrations", "promptFile": "reviewers/migrations.md",
+      "skills": [".agents/skills/db-safety"] }
+  ]
+}
+```
 
 ## Signal-to-noise features
 
@@ -109,17 +124,17 @@ harness with your repo's own skills.
 - **Incremental review** — on a re-review, loupe reviews only the files changed
   since its last review of the PR and replaces only those comments; comments on
   untouched files are kept. `--full` / `full: true` forces a whole-PR review.
-- **Walkthrough** — each review includes a collapsible changed-files table and,
-  when useful, a Mermaid sequence diagram.
 
 ## What a review looks like
 
 loupe posts a real GitHub **review** (not a plain comment): a structured body
-plus inline, line-anchored comments.
+plus inline, line-anchored comments. The review synthesizes — high-level
+summary, risks, bugs — rather than restating the diff (no file-by-file
+walkthrough).
 
 - **Body** — a stat line (🔴/🟡/🔵 counts · files), the summary, a **Concerns**
-  section (PR-level callouts not tied to a line), optional **Highlights**, a
-  collapsible **Walkthrough** table, an optional Mermaid diagram, and an "Other
+  section (PR-level risks not tied to a line), optional **Highlights**, an
+  optional Mermaid diagram (only for a genuinely complex flow), and an "Other
   notes" section for findings that couldn't be anchored.
 - **Inline comments** — one per `finding`, on the exact diff line. If the model's
   line is a few off (common in agentic mode), loupe **snaps it to the nearest
