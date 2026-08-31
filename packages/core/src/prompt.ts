@@ -98,8 +98,20 @@ may use your tools to read files. Use them deliberately to assess real-world
 impact — inspect the actual schema/table definitions, related migrations, model
 and query code, and existing indexes/constraints the diff interacts with. Ground
 each finding in what you actually found in the codebase, not just the diff.
-Be efficient: make a handful of targeted lookups, not an exhaustive crawl. As
-soon as you can review the diff confidently, STOP using tools and respond with
+
+Use SUBAGENTS heavily. Fan out independent investigations in parallel — one
+subagent per file, per suspected issue, or per question — instead of exploring
+serially yourself. Spawn many; they are cheap and fast.
+
+Convene a PANEL OF MODELS to pressure-test anything important. When you suspect a
+real bug (especially a blocker), do NOT trust a single opinion: spawn 2-3
+subagents on DIFFERENT models to independently confirm or refute it, and only
+report it if the panel agrees. Diversify the models across subagents — use a mix
+of glm-5.3-flash, glm-5.2-fast, and deepseek-v4-pro-0813 — so you get genuinely
+independent judgment, not the same model agreeing with itself.
+
+Be efficient with your OWN turns: delegate exploration to subagents, then
+synthesize. Once the panel has confirmed the findings, STOP and respond with
 ONLY the final JSON object — do not keep exploring.`.trim();
 
 const REASONING_NOTE: Record<ReasoningEffort, string> = {
@@ -121,15 +133,25 @@ export function buildSystemPrompt(opts: {
   profile?: Profile;
   /** Loaded skill docs (SKILL.md bodies) to fold into the reviewer's behavior. */
   skills?: readonly string[];
+  /** Repo convention docs (CLAUDE.md/AGENTS.md/…). Stable per repo → kept in the
+   * system prompt so it stays a cacheable prefix across PRs. */
+  conventions?: string;
 }): string {
   const skillsBlock =
     opts.skills && opts.skills.length > 0
       ? "Follow these skills for how you work and write:\n\n" +
         opts.skills.map((s) => s.trim()).join("\n\n---\n\n")
       : "";
+  const conventionsBlock = opts.conventions?.trim()
+    ? `Repository conventions to enforce (cite these where relevant):\n\n${opts.conventions.trim()}`
+    : "";
+  // Order matters for prompt caching: everything here is stable per reviewer/
+  // repo, so the whole system message is a cacheable prefix. Per-PR content (the
+  // diff, path notes, current date) lives in the user message instead.
   return [
     opts.guidance?.trim() || DEFAULT_REVIEW_GUIDANCE,
     skillsBlock,
+    conventionsBlock,
     REASONING_NOTE[opts.reasoning],
     PROFILE_DIRECTIVE[opts.profile ?? "chill"],
     opts.agentic ? AGENTIC_DIRECTIVE : HEADLESS_DIRECTIVE,
@@ -139,30 +161,54 @@ export function buildSystemPrompt(opts: {
     .join("\n\n");
 }
 
+/** Resolve a timezone label (IANA or common abbreviation) to a date/time line. */
+function environmentLine(timezone: string | undefined): string {
+  const tz = timezone?.trim() || "UTC";
+  const iana: Record<string, string> = {
+    PST: "America/Los_Angeles",
+    PDT: "America/Los_Angeles",
+    PT: "America/Los_Angeles",
+    EST: "America/New_York",
+    EDT: "America/New_York",
+    ET: "America/New_York",
+    CST: "America/Chicago",
+    UTC: "UTC",
+  };
+  let when: string;
+  try {
+    when = new Intl.DateTimeFormat("en-US", {
+      timeZone: iana[tz] ?? tz,
+      dateStyle: "full",
+      timeStyle: "short",
+    }).format(new Date());
+  } catch {
+    when = new Date().toISOString();
+  }
+  return `Environment: current date/time is ${when} (${tz}).`;
+}
+
 export type UserPromptInput = {
   readonly title: string;
   readonly description: string;
   readonly files: readonly DiffFile[];
-  /** Convention docs pulled from the target repo (CLAUDE.md/AGENTS.md/etc.). */
-  readonly conventions: string;
   /** Extra natural-language instructions for files matching a glob. */
   readonly pathInstructions?: readonly string[];
+  /** Timezone label for the environment line (e.g. "PST"). */
+  readonly timezone?: string;
 };
 
-/** The per-PR user message: metadata, the repo's conventions, and the diff. */
+/** The per-PR user message: environment, metadata, per-path notes, and the diff.
+ * Repo conventions live in the system prompt (stable/cacheable), not here. */
 export function buildUserPrompt(input: UserPromptInput): string {
-  const conventions = input.conventions.trim();
   const pathNotes = input.pathInstructions?.length
     ? `Extra instructions for some of the changed files:\n${input.pathInstructions
         .map((i) => `- ${i}`)
         .join("\n")}`
     : "";
   return [
+    environmentLine(input.timezone),
     `PR title: ${input.title}`,
     input.description ? `PR description:\n${input.description}` : "",
-    conventions
-      ? `Repository conventions to enforce (cite these where relevant):\n\n${conventions}`
-      : "No repository convention docs were found; apply general best practices.",
     pathNotes,
     "Diff under review:",
     renderDiff(input.files),

@@ -35,6 +35,7 @@ export type RunInput = {
   readonly pathInstructions?: readonly { glob: string; instruction: string }[];
   readonly ensembleModels?: readonly string[];
   readonly skills?: readonly string[];
+  readonly timezone?: string;
   readonly logger: Logger;
 };
 
@@ -91,6 +92,7 @@ export async function reviewPullRequest(
     pathInstructions: input.pathInstructions,
     ensembleModels: input.ensembleModels,
     skills: input.skills,
+    timezone: input.timezone,
     logger,
   });
 }

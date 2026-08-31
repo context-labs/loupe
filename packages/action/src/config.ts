@@ -45,6 +45,7 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   LOUPE_ENSEMBLE: z.string().default(""),
   LOUPE_SKILLS: z.string().default(""),
+  LOUPE_TIMEZONE: z.string().default("UTC"),
 });
 
 export type Config = {
@@ -67,6 +68,7 @@ export type Config = {
   readonly full: boolean;
   readonly ensembleModels: readonly string[];
   readonly skills: readonly string[];
+  readonly timezone: string;
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -107,6 +109,7 @@ export function loadConfig(): Config {
     skills: env.LOUPE_SKILLS.split(",")
       .map((s) => s.trim())
       .filter(Boolean),
+    timezone: env.LOUPE_TIMEZONE,
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,
   };

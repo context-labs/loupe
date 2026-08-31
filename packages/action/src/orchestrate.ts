@@ -55,6 +55,7 @@ export async function runReviews(
           r.ensemble ??
           (config.ensembleModels.length ? config.ensembleModels : undefined),
         skills: [...new Set([...(r.skills ?? []), ...config.skills])],
+        timezone: config.timezone,
         logger,
       });
       logger.info(`[${r.name}] ${formatResult(result)}`);
@@ -72,6 +73,7 @@ export async function runReviews(
       ? config.ensembleModels
       : undefined,
     skills: config.skills.length ? config.skills : undefined,
+    timezone: config.timezone,
     logger,
   });
   logger.info(formatResult(result));

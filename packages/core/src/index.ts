@@ -89,6 +89,8 @@ export type ReviewRequest = {
    * ".agents/skills/i-have-adhd" to enforce that output style.
    */
   readonly skills?: readonly string[];
+  /** Timezone label for the review's environment line (e.g. "PST"). */
+  readonly timezone?: string;
   readonly logger: Logger;
 };
 
@@ -224,13 +226,14 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     agentic,
     profile,
     skills,
+    conventions: conventions.text,
   });
   const userPrompt = buildUserPrompt({
     title: pull.title,
     description: pull.description,
     files,
-    conventions: conventions.text,
     pathInstructions,
+    timezone: req.timezone,
   });
 
   // The harness runs where the repo is checked out. Scope to the subdir only if
@@ -278,6 +281,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
               agentic: false,
               profile,
               skills,
+              conventions: conventions.text,
             }),
         userPrompt,
         model,

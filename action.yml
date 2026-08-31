@@ -64,6 +64,10 @@ inputs:
     description: "Comma-separated skill paths (SKILL.md or skill dir) to fold into the reviewer."
     required: false
     default: ""
+  timezone:
+    description: "Timezone label for the review environment line (e.g. PST)."
+    required: false
+    default: "UTC"
 runs:
   using: "composite"
   steps:
@@ -91,4 +95,5 @@ runs:
         LOUPE_FULL: ${{ inputs.full }}
         LOUPE_ENSEMBLE: ${{ inputs.ensemble }}
         LOUPE_SKILLS: ${{ inputs.skills }}
+        LOUPE_TIMEZONE: ${{ inputs.timezone }}
       run: bun run packages/action/src/main.ts

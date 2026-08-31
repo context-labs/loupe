@@ -102,6 +102,11 @@ program
   )
   .option("--profile <name>", "noise profile: quiet|chill|assertive", "chill")
   .option(
+    "--timezone <tz>",
+    "timezone label for the review environment line",
+    "UTC",
+  )
+  .option(
     "--ensemble <models>",
     "comma-separated models to ensemble; keep findings a majority agree on",
   )
@@ -135,6 +140,7 @@ program
         reviewer?: string;
         agentic: boolean;
         profile: string;
+        timezone: string;
         ensemble?: string;
         skills?: string;
         verify: boolean;
@@ -180,6 +186,7 @@ program
           full: opts.full,
           ensembleModels,
           skills,
+          timezone: opts.timezone,
         };
 
         if (opts.config) {
