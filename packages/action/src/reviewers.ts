@@ -34,6 +34,8 @@ const reviewerSchema = z
       .optional(),
     /** Models to ensemble (>= 2 keeps only findings a majority agree on). */
     ensemble: z.array(z.string()).optional(),
+    /** Skill docs (paths to SKILL.md or a skill dir) to fold into the reviewer. */
+    skills: z.array(z.string()).optional(),
   })
   .refine((r) => !(r.prompt && r.promptFile), {
     message: "reviewer has both prompt and promptFile; use one",
@@ -53,6 +55,7 @@ export type Reviewer = {
   readonly verify?: boolean;
   readonly pathInstructions?: readonly { glob: string; instruction: string }[];
   readonly ensemble?: readonly string[];
+  readonly skills?: readonly string[];
 };
 
 /**
@@ -80,5 +83,6 @@ export function loadReviewers(configPath: string): Reviewer[] {
     verify: r.verify,
     pathInstructions: r.pathInstructions,
     ensemble: r.ensemble,
+    skills: r.skills,
   }));
 }

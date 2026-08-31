@@ -109,6 +109,10 @@ program
     "--ensemble <models>",
     "comma-separated models to ensemble; keep findings a majority agree on",
   )
+  .option(
+    "--skills <paths>",
+    "comma-separated skill paths (SKILL.md or skill dir) to fold into the reviewer",
+  )
   .option("--no-verify", "skip the second-opinion verification pass")
   .option(
     "--full",
@@ -136,6 +140,7 @@ program
         agentic: boolean;
         profile: string;
         ensemble?: string;
+        skills?: string;
         verify: boolean;
         full: boolean;
         dryRun: boolean;
@@ -148,6 +153,12 @@ program
         const { owner, repo, pullNumber } = parsePr(pr);
         const ensembleModels = opts.ensemble
           ? opts.ensemble
+              .split(",")
+              .map((m) => m.trim())
+              .filter(Boolean)
+          : undefined;
+        const skills = opts.skills
+          ? opts.skills
               .split(",")
               .map((m) => m.trim())
               .filter(Boolean)
@@ -172,6 +183,7 @@ program
           verify: opts.verify,
           full: opts.full,
           ensembleModels,
+          skills,
         };
 
         if (opts.config) {
@@ -200,6 +212,7 @@ program
               verify: r.verify ?? opts.verify,
               pathInstructions: r.pathInstructions,
               ensembleModels: r.ensemble ?? ensembleModels,
+              skills: r.skills ?? skills,
               logger,
             });
             logger.info(`[${r.name}] ${formatResult(result)}`);

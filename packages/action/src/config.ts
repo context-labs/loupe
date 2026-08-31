@@ -44,6 +44,7 @@ const envSchema = z.object({
     .default("false")
     .transform((v) => v === "true"),
   LOUPE_ENSEMBLE: z.string().default(""),
+  LOUPE_SKILLS: z.string().default(""),
 });
 
 export type Config = {
@@ -65,6 +66,7 @@ export type Config = {
   readonly verify: boolean;
   readonly full: boolean;
   readonly ensembleModels: readonly string[];
+  readonly skills: readonly string[];
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -101,6 +103,9 @@ export function loadConfig(): Config {
     full: env.LOUPE_FULL,
     ensembleModels: env.LOUPE_ENSEMBLE.split(",")
       .map((m) => m.trim())
+      .filter(Boolean),
+    skills: env.LOUPE_SKILLS.split(",")
+      .map((s) => s.trim())
       .filter(Boolean),
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,

@@ -34,6 +34,7 @@ export type RunInput = {
   readonly full?: boolean;
   readonly pathInstructions?: readonly { glob: string; instruction: string }[];
   readonly ensembleModels?: readonly string[];
+  readonly skills?: readonly string[];
   readonly logger: Logger;
 };
 
@@ -89,6 +90,7 @@ export async function reviewPullRequest(
     full: input.full,
     pathInstructions: input.pathInstructions,
     ensembleModels: input.ensembleModels,
+    skills: input.skills,
     logger,
   });
 }

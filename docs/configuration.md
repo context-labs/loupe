@@ -40,6 +40,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `verify` | no | `false` to skip the verification pass (default on). |
 | `pathInstructions` | no | `[{ glob, instruction }]` extra review instructions for matching files. |
 | `ensemble` | no | `["kimi-k3","glm-5.2-fast"]` — run several models, keep findings a majority agree on. |
+| `skills` | no | Paths to skill docs (a `SKILL.md` or a skill dir) folded into the reviewer, e.g. `[".agents/skills/i-have-adhd"]` to enforce a terse output style. |
 
 Globs are matched with `Bun.Glob` against repo-relative paths. `include` also
 composes with `--dir` (subdir scope).
@@ -81,6 +82,15 @@ review — no vendored rules. Default paths:
 `CLAUDE.md, AGENTS.md, .loupe.md, CONTRIBUTING.md` (override with `--conventions`
 or `LOUPE_CONVENTION_PATHS`). With `--dir`, paths resolve under the subdir
 (`inference/AGENTS.md`).
+
+## Skills
+
+A reviewer can load repo skill docs into its own behavior via `skills` (config)
+or `--skills` (CLI): each entry is a path (relative to the checkout) to a
+`SKILL.md` or a skill directory. loupe reads them and folds them into the system
+prompt — so, for example, `[".agents/skills/i-have-adhd"]` makes the reviewer
+adopt that terse output style. This is how you enhance the underlying agent
+harness with your repo's own skills.
 
 ## Signal-to-noise features
 

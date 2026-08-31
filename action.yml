@@ -60,6 +60,10 @@ inputs:
     description: "Comma-separated models to ensemble; keep findings a majority agree on."
     required: false
     default: ""
+  skills:
+    description: "Comma-separated skill paths (SKILL.md or skill dir) to fold into the reviewer."
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -86,4 +90,5 @@ runs:
         LOUPE_VERIFY: ${{ inputs.verify }}
         LOUPE_FULL: ${{ inputs.full }}
         LOUPE_ENSEMBLE: ${{ inputs.ensemble }}
+        LOUPE_SKILLS: ${{ inputs.skills }}
       run: bun run packages/action/src/main.ts

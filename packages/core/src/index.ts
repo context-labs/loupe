@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Harness } from "@loupe/harness";
@@ -83,6 +83,12 @@ export type ReviewRequest = {
    * Supersedes the verification pass. Needs >= 2 models to take effect.
    */
   readonly ensembleModels?: readonly string[];
+  /**
+   * Skill docs to fold into the reviewer — paths (relative to the checkout) to a
+   * SKILL.md or a skill directory (SKILL.md is appended). E.g.
+   * ".agents/skills/i-have-adhd" to enforce that output style.
+   */
+  readonly skills?: readonly string[];
   readonly logger: Logger;
 };
 
@@ -207,11 +213,17 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     })
     .map((pi) => `(${pi.glob}) ${pi.instruction}`);
 
+  const skills = loadSkills(req.workdir, req.skills, logger);
+  if (skills.length > 0) {
+    logger.info("Loaded skills", { count: skills.length });
+  }
+
   const systemPrompt = buildSystemPrompt({
     guidance: req.guidance,
     reasoning: req.reasoning,
     agentic,
     profile,
+    skills,
   });
   const userPrompt = buildUserPrompt({
     title: pull.title,
@@ -265,6 +277,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
               reasoning: req.reasoning,
               agentic: false,
               profile,
+              skills,
             }),
         userPrompt,
         model,
@@ -423,4 +436,30 @@ async function verifyInline(
     });
     return [...findings];
   }
+}
+
+/**
+ * Load skill docs from the checkout to fold into the reviewer. Each entry is a
+ * path to a SKILL.md or a skill directory (SKILL.md is appended). Best-effort:
+ * a missing skill is warned and skipped, never fatal.
+ */
+function loadSkills(
+  workdir: string,
+  paths: readonly string[] | undefined,
+  logger: Logger,
+): string[] {
+  const out: string[] = [];
+  for (const p of paths ?? []) {
+    try {
+      const abs = join(workdir, p);
+      const file =
+        existsSync(abs) && statSync(abs).isDirectory()
+          ? join(abs, "SKILL.md")
+          : abs;
+      out.push(readFileSync(file, "utf8"));
+    } catch {
+      logger.warn("Could not load skill; skipping", { skill: p });
+    }
+  }
+  return out;
 }

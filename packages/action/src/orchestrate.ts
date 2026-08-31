@@ -54,6 +54,7 @@ export async function runReviews(
         ensembleModels:
           r.ensemble ??
           (config.ensembleModels.length ? config.ensembleModels : undefined),
+        skills: r.skills ?? (config.skills.length ? config.skills : undefined),
         logger,
       });
       logger.info(`[${r.name}] ${formatResult(result)}`);
@@ -70,6 +71,7 @@ export async function runReviews(
     ensembleModels: config.ensembleModels.length
       ? config.ensembleModels
       : undefined,
+    skills: config.skills.length ? config.skills : undefined,
     logger,
   });
   logger.info(formatResult(result));
