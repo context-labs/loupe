@@ -41,11 +41,62 @@ const reviewerSchema = z
     message: "reviewer has both prompt and promptFile; use one",
   });
 
+/** whip provider + model panel, so the review workflow needn't hand-write
+ * ~/.whip/config.json in a CI step. loupe materializes it into a throwaway
+ * WHIP_HOME at review time. */
+const whipConfigSchema = z.object({
+  provider: z.object({
+    name: z.string().min(1),
+    baseUrl: z.string().min(1),
+    apiKeyEnv: z.string().min(1),
+    label: z.string().optional(),
+  }),
+  models: z.array(z.string().min(1)).min(1),
+  defaultModel: z.string().optional(),
+});
+
 const configSchema = z.object({
   reviewers: z.array(reviewerSchema).min(1),
   /** Skills applied to every reviewer (merged with each reviewer's own). */
   skills: z.array(z.string()).optional(),
+  // Top-level review defaults. Action inputs / CLI flags override these; these
+  // in turn override loupe's built-in defaults. Keeps harness/model/timezone/dir
+  // with the repo's review policy instead of duplicated across workflow files.
+  harness: z.string().optional(),
+  model: z.string().optional(),
+  reasoning: z.enum(["low", "medium", "high"]).optional(),
+  profile: z.enum(["quiet", "chill", "assertive"]).optional(),
+  timezone: z.string().optional(),
+  dir: z.string().optional(),
+  whip: whipConfigSchema.optional(),
 });
+
+/** The top-level, non-reviewer settings from a .loupe.json — review defaults a
+ * repo declares once instead of repeating them in every workflow file. */
+export type LoupeSettings = {
+  readonly harness?: string;
+  readonly model?: string;
+  readonly reasoning?: ReasoningEffort;
+  readonly profile?: Profile;
+  readonly timezone?: string;
+  readonly dir?: string;
+  readonly whip?: z.infer<typeof whipConfigSchema>;
+};
+
+/** Read only the top-level settings from a config file (not the reviewers). */
+export function loadSettings(configPath: string): LoupeSettings {
+  const raw: unknown = JSON.parse(readFileSync(configPath, "utf8"));
+  const c = configSchema.parse(raw);
+  return {
+    harness: c.harness,
+    model: c.model,
+    reasoning: c.reasoning,
+    profile: c.profile,
+    timezone: c.timezone,
+    dir: c.dir,
+    whip: c.whip,
+  };
+}
 
 export type Reviewer = {
   readonly name: string;

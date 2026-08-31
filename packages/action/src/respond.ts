@@ -75,6 +75,7 @@ async function runFix(
     agentic: true,
     workdir: cwd,
     env,
+    whipConfig: config.whipConfig,
     logger,
   });
 
@@ -188,6 +189,7 @@ export async function handleComment(
     agentic: false,
     workdir: config.workdir,
     env,
+    whipConfig: config.whipConfig,
     logger,
   });
   const answer = stdout.trim() || "I couldn't produce an answer for that.";

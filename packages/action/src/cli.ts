@@ -7,7 +7,7 @@ import { createRootLogger, shutdownLogger } from "@loupe/logger";
 import { Command } from "commander";
 
 import { resolveProviders } from "./config";
-import { loadReviewers } from "./reviewers";
+import { loadReviewers, loadSettings } from "./reviewers";
 import { formatResult, renderReview, reviewPullRequest } from "./run";
 
 const REASONING: readonly ReasoningEffort[] = ["low", "medium", "high"];
@@ -68,9 +68,12 @@ program
   .command("review")
   .description("Review a pull request and post inline comments")
   .argument("<pr>", "PR URL (github.com/owner/repo/pull/N) or owner/repo#N")
-  .option("-H, --harness <name>", "agent CLI to review with", "whip")
-  .option("-m, --model <name>", "model id for the harness", "kimi-k3")
-  .option("-r, --reasoning <level>", "reasoning effort: low|medium|high", "low")
+  .option("-H, --harness <name>", "agent CLI to review with (default whip)")
+  .option("-m, --model <name>", "model id for the harness (default kimi-k3)")
+  .option(
+    "-r, --reasoning <level>",
+    "reasoning effort: low|medium|high (default low)",
+  )
   .option(
     "--prompt-file <path>",
     "custom reviewer guidance replacing the default (output contract still enforced)",
@@ -100,12 +103,11 @@ program
     "--no-agentic",
     "review one-shot from the diff only, instead of exploring the checkout with tools",
   )
-  .option("--profile <name>", "noise profile: quiet|chill|assertive", "chill")
   .option(
-    "--timezone <tz>",
-    "timezone label for the review environment line",
-    "UTC",
+    "--profile <name>",
+    "noise profile: quiet|chill|assertive (default chill)",
   )
+  .option("--timezone <tz>", "timezone label for the review environment line")
   .option(
     "--ensemble <models>",
     "comma-separated models to ensemble; keep findings a majority agree on",
@@ -127,9 +129,9 @@ program
     async (
       pr: string,
       opts: {
-        harness: string;
-        model: string;
-        reasoning: string;
+        harness?: string;
+        model?: string;
+        reasoning?: string;
         promptFile?: string;
         providers: string;
         token?: string;
@@ -139,8 +141,8 @@ program
         config?: string;
         reviewer?: string;
         agentic: boolean;
-        profile: string;
-        timezone: string;
+        profile?: string;
+        timezone?: string;
         ensemble?: string;
         skills?: string;
         verify: boolean;
@@ -153,6 +155,19 @@ program
       const logger = createRootLogger("loupe-cli");
       try {
         const { owner, repo, pullNumber } = parsePr(pr);
+        // Top-level review defaults from .loupe.json; a flag overrides the file,
+        // the file overrides loupe's built-in default.
+        const settings = opts.config ? loadSettings(opts.config) : {};
+        const harnessName = opts.harness ?? settings.harness ?? "whip";
+        const model = opts.model ?? settings.model ?? "kimi-k3";
+        const reasoning = parseReasoning(
+          opts.reasoning ?? settings.reasoning ?? "low",
+        );
+        const profile = parseProfile(
+          opts.profile ?? settings.profile ?? "chill",
+        );
+        const timezone = opts.timezone ?? settings.timezone ?? "UTC";
+        const subdir = opts.dir ?? settings.dir;
         const ensembleModels = opts.ensemble
           ? opts.ensemble
               .split(",")
@@ -170,7 +185,7 @@ program
           owner,
           repo,
           pullNumber,
-          harnessName: opts.harness,
+          harnessName,
           workdir: opts.workdir,
           conventionPaths: opts.conventions
             .split(",")
@@ -180,13 +195,14 @@ program
             env: opts.infisicalEnv,
             projectId: opts.infisicalProject,
           }),
-          subdir: opts.dir,
+          subdir,
           dryRun: opts.dryRun,
           verify: opts.verify,
           full: opts.full,
           ensembleModels,
           skills,
-          timezone: opts.timezone,
+          timezone,
+          whipConfig: settings.whip,
         };
 
         if (opts.config) {
@@ -209,9 +225,9 @@ program
               include: r.include,
               exclude: r.exclude,
               agentic: r.agentic ?? opts.agentic,
-              model: r.model ?? opts.model,
-              reasoning: parseReasoning(r.reasoning ?? opts.reasoning),
-              profile: r.profile ?? parseProfile(opts.profile),
+              model: r.model ?? model,
+              reasoning: r.reasoning ? parseReasoning(r.reasoning) : reasoning,
+              profile: r.profile ?? profile,
               verify: r.verify ?? opts.verify,
               pathInstructions: r.pathInstructions,
               ensembleModels: r.ensemble ?? ensembleModels,
@@ -227,9 +243,9 @@ program
         const result = await reviewPullRequest({
           ...base,
           agentic: opts.agentic,
-          model: opts.model,
-          reasoning: parseReasoning(opts.reasoning),
-          profile: parseProfile(opts.profile),
+          model,
+          reasoning,
+          profile,
           guidance: opts.promptFile
             ? readFileSync(opts.promptFile, "utf8")
             : undefined,

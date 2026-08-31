@@ -27,6 +27,7 @@ export async function runReviews(
     providers: config.providers,
     subdir: config.subdir,
     verify: config.verify,
+    whipConfig: config.whipConfig,
     full,
   };
 

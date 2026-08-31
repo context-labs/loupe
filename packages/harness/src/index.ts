@@ -1,6 +1,32 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { Logger } from "@loupe/logger";
+
+/**
+ * A whip provider + model catalog, declared in loupe's config so the review
+ * workflow doesn't have to hand-write `~/.whip/config.json` in a CI step. When
+ * present, the whip harness materializes it into a throwaway config dir and
+ * points `WHIP_HOME` at it — never touching a developer's real `~/.whip`.
+ */
+export type WhipConfig = {
+  /** OpenAI-compatible provider whip routes through. */
+  readonly provider: {
+    /** Provider key (e.g. "inference-net"). */
+    readonly name: string;
+    readonly baseUrl: string;
+    /** Env var whip reads the API key from at runtime (e.g. "INFERENCE_API_KEY"). */
+    readonly apiKeyEnv: string;
+    /** Display label; defaults to `name`. */
+    readonly label?: string;
+  };
+  /** Models whip may route to (the panel). The first is the default if unset. */
+  readonly models: readonly string[];
+  /** Default model; defaults to the review's model, else the first in `models`. */
+  readonly defaultModel?: string;
+};
 
 /**
  * What a harness needs to run a review: the system prompt (reviewer persona +
@@ -17,6 +43,8 @@ export type HarnessContext = {
   readonly agentic?: boolean;
   readonly workdir: string;
   readonly env: Record<string, string>;
+  /** whip provider/model catalog to materialize into a throwaway WHIP_HOME. */
+  readonly whipConfig?: WhipConfig;
   readonly logger: Logger;
 };
 
@@ -216,11 +244,40 @@ function runWhipStreaming(
 }
 
 /**
+ * Materialize a WhipConfig into a throwaway config dir and return the env
+ * (WHIP_HOME) that points whip at it. Keeps loupe's `whip` block out of a
+ * developer's real ~/.whip and removes the hand-written config step from CI.
+ */
+export function materializeWhipHome(cfg: WhipConfig): Record<string, string> {
+  const dir = mkdtempSync(join(tmpdir(), "loupe-whip-"));
+  const providerKey = cfg.provider.name;
+  const defaultModel = cfg.defaultModel ?? cfg.models[0];
+  const config = {
+    defaultModel,
+    defaultProvider: providerKey,
+    providers: {
+      [providerKey]: {
+        name: cfg.provider.label ?? providerKey,
+        baseUrl: cfg.provider.baseUrl,
+        api: "openai-completions",
+        apiKeyEnv: cfg.provider.apiKeyEnv,
+      },
+    },
+    models: Object.fromEntries(
+      cfg.models.map((m) => [m, { providers: [providerKey] }]),
+    ),
+  };
+  writeFileSync(join(dir, "config.json"), JSON.stringify(config, null, 2));
+  return { WHIP_HOME: dir };
+}
+
+/**
  * whip (context-labs custom harness): runs `whip run --format json` and streams
  * the event log live. `-system` sets the reviewer/output/headless instructions.
- * It self-authenticates from its own local login (~/.whip/), so loupe injects no
- * credentials. `-max-turns` caps the tool loop as a safety net in case the model
- * ignores the headless (no-tools) directive in the system prompt.
+ * By default it self-authenticates from its own local login (~/.whip/); when a
+ * `whipConfig` is supplied, loupe writes a throwaway WHIP_HOME config declaring
+ * the provider + model panel instead. `-max-turns` caps the tool loop as a
+ * safety net in case the model ignores the headless directive.
  */
 export function whipHarness(): Harness {
   return {
@@ -243,7 +300,11 @@ export function whipHarness(): Harness {
         ctx.systemPrompt,
       ];
       if (ctx.model) args.push("-m", ctx.model);
-      return runWhipStreaming(args, ctx);
+      const whipEnv = ctx.whipConfig ? materializeWhipHome(ctx.whipConfig) : {};
+      return runWhipStreaming(args, {
+        ...ctx,
+        env: { ...ctx.env, ...whipEnv },
+      });
     },
   };
 }
