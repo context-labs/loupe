@@ -39,26 +39,33 @@ or a SHA instead of `@v0`.
 
 Prerequisite: the change is merged to `main` and CI is green.
 
+**Push one exact-version tag — the rest is automated.**
+
 ```bash
 git checkout main && git pull
-
-# 1. Tag the exact version (semver; loupe is pre-1.0, so breaking changes bump MINOR).
-git tag v0.11.0
+git tag v0.11.0          # semver; pre-1.0, so features bump MINOR, fixes bump PATCH
 git push origin v0.11.0
-
-# 2. Move the major tag so @v0 consumers get it.
-git tag -f v0
-git push -f origin v0
 ```
 
-That's the whole release. No build, no publish step — the tag *is* the release,
-because the action runs from the checked-out source.
+That tag push fires [`.github/workflows/release.yml`](../.github/workflows/release.yml),
+which:
+
+1. **gates** on `task check` (same format + lint + tsc + tests a PR runs) — a
+   release that wouldn't pass a PR never ships;
+2. **moves the `v0` major tag** to this commit, so `@v0` consumers pick it up
+   (no manual `git tag -f v0` / force-push);
+3. **publishes a GitHub Release** for the version with auto-generated notes.
+
+The workflow triggers only on exact-version tags (`v*.*.*`); the `v0` tag it
+pushes has no dots after the major, so it never re-triggers itself. There is no
+build or upload step — the Action runs from source, so the tag *is* the release.
 
 Verify:
 
 ```bash
 git ls-remote --tags origin | grep -E 'refs/tags/v0$|v0\.11\.0'
 # both should point at the same commit
+gh release view v0.11.0
 ```
 
 ### Versioning policy
