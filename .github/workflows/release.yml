@@ -1,0 +1,58 @@
+name: release
+
+# Cut a release by pushing an exact-version tag:
+#   git tag v0.11.0 && git push origin v0.11.0
+#
+# loupe has no build artifact — the Action runs from source, so the tag IS the
+# release. This workflow does the two chores by hand otherwise: gate on the same
+# checks a PR runs, move the `v0` major tag to this commit (so `@v0` consumers
+# get it), and publish a GitHub Release with generated notes.
+#
+# The trigger is exact-version tags only (`v*.*.*`); the moving `v0` tag this
+# workflow pushes has no dots after the major, so it never re-triggers.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # move the v0 tag + create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history so the tag move is a real commit ref
+
+      # Gate: never publish a release that wouldn't pass a PR.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: task check
+
+      # Move the major tag (v0.11.0 -> v0) so `@v0` consumers pick this up.
+      - name: Move the major tag
+        run: |
+          version="${GITHUB_REF_NAME}"                     # e.g. v0.11.0
+          major="v$(echo "${version#v}" | cut -d. -f1)"    # -> v0
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$major" "$GITHUB_SHA"
+          git push -f origin "$major"
+          echo "Moved $major -> $GITHUB_SHA (from $version)"
+
+      # Publish the GitHub Release with auto-generated notes.
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

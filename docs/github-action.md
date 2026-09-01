@@ -35,7 +35,7 @@ jobs:
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
 ```
 
-See `.github/workflows/review.example.yml` for whip / claude / custom-prompt
+See `examples/review.example.yml` for whip / claude / custom-prompt
 variants. The live monorepo wiring is `inference/.loupe/` + the
 `inference--loupe-review.yml` workflow.
 

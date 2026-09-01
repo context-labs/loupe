@@ -144,7 +144,7 @@ its env-var name is in the config.
 
 With that, the whole workflow is just: checkout → install the harness binary →
 `context-labs/loupe@v0` with `config: .loupe.json` and the secret in `env`. See
-Variant D in `.github/workflows/review.example.yml`.
+Variant D in `examples/review.example.yml`.
 
 ```bash
 loupe review owner/repo#123 --config .loupe.json
@@ -165,7 +165,11 @@ only persona/priorities; never the JSON schema. See `examples/loupe-prompt.md`.
 
 ## GitHub integration
 
-`action.yml` is a composite Action. Copy `.github/workflows/review.example.yml`
+Pin the action by ref: `@v0` tracks the latest `v0.x.y` (recommended), or pin an
+exact `@v0.10.1` / a SHA for reproducibility — see
+[docs/releases.md](docs/releases.md).
+
+`action.yml` is a composite Action. Copy `examples/review.example.yml`
 into a consuming repo, or register it once at the org level. A second workflow on
 comment events gives you **`@loupe` chat**: `@loupe review` (re-review),
 `@loupe fix <what>` (loupe edits the branch and pushes a commit),
