@@ -11,6 +11,8 @@ own conventions, runs its focused reviewers agentically by default.
   reasoning, agentic mode, custom prompts, conventions.
 - [Credentials](credentials.md) — the provider chain and per-harness auth.
 - [GitHub Action](github-action.md) — wire loupe into CI, inputs, secrets.
+- [Releases & versioning](releases.md) — how to pin/select a version (`@v0` vs a
+  pinned tag vs a SHA) and how maintainers cut a release.
 
 ## Maintainer docs
 
