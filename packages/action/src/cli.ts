@@ -116,7 +116,7 @@ program
     "--skills <paths>",
     "comma-separated skill paths (SKILL.md or skill dir) to fold into the reviewer",
   )
-  .option("--max-turns <n>", "cap the agentic tool loop (default 40)", (v) => {
+  .option("--max-turns <n>", "cap the agentic tool loop (default 10)", (v) => {
     const n = Number(v);
     if (!Number.isInteger(n) || n <= 0)
       throw new Error(`Invalid --max-turns "${v}". Use a positive integer.`);

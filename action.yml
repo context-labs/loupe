@@ -72,7 +72,7 @@ inputs:
     required: false
     default: ""
   max-turns:
-    description: "Cap on the agentic tool loop. Overrides .loupe.json; default 40."
+    description: "Cap on the agentic tool loop. Overrides .loupe.json; default 10."
     required: false
     default: ""
 runs:
