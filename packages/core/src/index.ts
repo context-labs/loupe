@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Harness } from "@loupe/harness";
+import type { Harness, WhipConfig } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
 
 import {
@@ -45,6 +45,8 @@ export type ReviewRequest = {
   readonly workdir: string;
   /** Secrets to inject into the harness subprocess (e.g. ANTHROPIC_API_KEY). */
   readonly harnessEnv: Record<string, string>;
+  /** whip provider/model catalog to materialize into a throwaway WHIP_HOME. */
+  readonly whipConfig?: WhipConfig;
   /** Convention doc paths to pull from the target repo, in priority order. */
   readonly conventionPaths: readonly string[];
   /**
@@ -91,6 +93,8 @@ export type ReviewRequest = {
   readonly skills?: readonly string[];
   /** Timezone label for the review's environment line (e.g. "PST"). */
   readonly timezone?: string;
+  /** Cap on the agentic tool loop passed to the harness (default 10). */
+  readonly maxTurns?: number;
   readonly logger: Logger;
 };
 
@@ -288,6 +292,8 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
         agentic: useAgentic,
         workdir: harnessCwd,
         env: req.harnessEnv,
+        whipConfig: req.whipConfig,
+        maxTurns: req.maxTurns,
         logger,
       });
     let stdout: string;
@@ -424,6 +430,8 @@ async function verifyInline(
       agentic: false,
       workdir: harnessCwd,
       env: req.harnessEnv,
+      whipConfig: req.whipConfig,
+      maxTurns: req.maxTurns,
       logger: req.logger,
     });
     const verdicts = parseVerification(stdout);

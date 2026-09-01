@@ -22,6 +22,27 @@ import { runReviews } from "./orchestrate";
 
 const MENTION = /@loupe\b/i;
 
+/**
+ * Post a visible failure comment so a command that throws after its ack never
+ * reads as silence. The full stack lives in the Actions run logs; the comment
+ * carries the short reason so a maintainer knows it errored (and where to look).
+ */
+async function postFailure(
+  octokit: Octokit,
+  ref: PullRef,
+  what: string,
+  err: unknown,
+  logger: Logger,
+): Promise<void> {
+  const reason = err instanceof Error ? err.message : String(err);
+  logger.error(`Chat command failed: ${what}`, { error: reason });
+  await postIssueComment(
+    octokit,
+    ref,
+    `⚠️ I couldn't complete the ${what} — ${reason.slice(0, 500)}\n\nSee the Actions run logs for details.`,
+  );
+}
+
 const HELP = `**loupe commands** (mention \`@loupe\`):
 - \`@loupe review\` — re-review the whole PR now.
 - \`@loupe fix <what to change>\` — make the change and push a commit to this PR.
@@ -75,6 +96,8 @@ async function runFix(
     agentic: true,
     workdir: cwd,
     env,
+    whipConfig: config.whipConfig,
+    maxTurns: config.maxTurns,
     logger,
   });
 
@@ -155,7 +178,11 @@ export async function handleComment(
   if (/^(full\s+)?review\b/i.test(instruction)) {
     logger.info("Chat command: review");
     await postIssueComment(octokit, ref, "🔍 On it — re-reviewing this PR.");
-    await runReviews(config, logger, true);
+    try {
+      await runReviews(config, logger, true);
+    } catch (err) {
+      await postFailure(octokit, ref, "review", err, logger);
+    }
     return;
   }
 
@@ -163,33 +190,43 @@ export async function handleComment(
   if (fixMatch) {
     logger.info("Chat command: fix");
     await postIssueComment(octokit, ref, "🔧 On it — working on a fix.");
-    await runFix(
-      config,
-      octokit,
-      ref,
-      fixMatch[1]?.trim() || instruction,
-      logger,
-    );
+    try {
+      await runFix(
+        config,
+        octokit,
+        ref,
+        fixMatch[1]?.trim() || instruction,
+        logger,
+      );
+    } catch (err) {
+      await postFailure(octokit, ref, "fix", err, logger);
+    }
     return;
   }
 
   // Free-form question → answer from the diff.
   logger.info("Chat question", { chars: instruction.length });
-  const harness = getHarness(config.harnessName);
-  const env = await resolveCredentials(
-    harness.credentialKeys,
-    config.providers,
-  );
-  const pull = await fetchPullContext(octokit, ref);
-  const stdout = await harness.review({
-    systemPrompt: buildChatSystemPrompt(),
-    userPrompt: buildChatUserPrompt(instruction, pull.files),
-    model: config.model,
-    agentic: false,
-    workdir: config.workdir,
-    env,
-    logger,
-  });
-  const answer = stdout.trim() || "I couldn't produce an answer for that.";
-  await postIssueComment(octokit, ref, answer);
+  try {
+    const harness = getHarness(config.harnessName);
+    const env = await resolveCredentials(
+      harness.credentialKeys,
+      config.providers,
+    );
+    const pull = await fetchPullContext(octokit, ref);
+    const stdout = await harness.review({
+      systemPrompt: buildChatSystemPrompt(),
+      userPrompt: buildChatUserPrompt(instruction, pull.files),
+      model: config.model,
+      agentic: false,
+      workdir: config.workdir,
+      env,
+      whipConfig: config.whipConfig,
+      maxTurns: config.maxTurns,
+      logger,
+    });
+    const answer = stdout.trim() || "I couldn't produce an answer for that.";
+    await postIssueComment(octokit, ref, answer);
+  } catch (err) {
+    await postFailure(octokit, ref, "answer", err, logger);
+  }
 }

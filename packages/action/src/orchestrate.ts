@@ -27,6 +27,8 @@ export async function runReviews(
     providers: config.providers,
     subdir: config.subdir,
     verify: config.verify,
+    whipConfig: config.whipConfig,
+    maxTurns: config.maxTurns,
     full,
   };
 
@@ -38,8 +40,6 @@ export async function runReviews(
     logger.info("Running reviewers", {
       reviewers: reviewers.map((r) => r.name),
     });
-    // Reviewers are independent (each posts its own labeled review), so run them
-    // concurrently — wall-clock becomes the slowest reviewer, not their sum.
     await Promise.all(
       reviewers.map(async (r) => {
         const result = await reviewPullRequest({
@@ -59,6 +59,7 @@ export async function runReviews(
             (config.ensembleModels.length ? config.ensembleModels : undefined),
           skills: [...new Set([...(r.skills ?? []), ...config.skills])],
           timezone: config.timezone,
+          maxTurns: r.maxTurns ?? config.maxTurns,
           logger,
         });
         logger.info(`[${r.name}] ${formatResult(result)}`);

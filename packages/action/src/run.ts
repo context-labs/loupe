@@ -8,7 +8,7 @@ import {
   resolveCredentials,
   type CredentialProvider,
 } from "@loupe/credentials";
-import { getHarness } from "@loupe/harness";
+import { getHarness, type WhipConfig } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
 
 export type RunInput = {
@@ -36,6 +36,8 @@ export type RunInput = {
   readonly ensembleModels?: readonly string[];
   readonly skills?: readonly string[];
   readonly timezone?: string;
+  readonly whipConfig?: WhipConfig;
+  readonly maxTurns?: number;
   readonly logger: Logger;
 };
 
@@ -76,6 +78,7 @@ export async function reviewPullRequest(
     harness,
     workdir: input.workdir,
     harnessEnv,
+    whipConfig: input.whipConfig,
     conventionPaths: input.conventionPaths,
     subdir: input.subdir,
     dryRun: input.dryRun,
@@ -93,6 +96,7 @@ export async function reviewPullRequest(
     ensembleModels: input.ensembleModels,
     skills: input.skills,
     timezone: input.timezone,
+    maxTurns: input.maxTurns,
     logger,
   });
 }

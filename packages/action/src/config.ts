@@ -8,7 +8,16 @@ import {
   infisicalProvider,
   type CredentialProvider,
 } from "@loupe/credentials";
+import type { WhipConfig } from "@loupe/harness";
 import { z } from "zod";
+
+import { loadSettings, type LoupeSettings } from "./reviewers";
+
+/** An empty string from an unset Action input counts as "not provided". */
+const optionalInput = z
+  .string()
+  .optional()
+  .transform((v) => (v && v.trim() ? v.trim() : undefined));
 
 /**
  * All environment reading happens here, parsed with Zod, then passed inward as
@@ -21,9 +30,11 @@ const envSchema = z.object({
   GITHUB_EVENT_NAME: z.string().optional(),
   GITHUB_WORKSPACE: z.string().optional(),
   LOUPE_PR_NUMBER: z.coerce.number().int().positive().optional(),
-  LOUPE_HARNESS: z.string().default("whip"),
-  LOUPE_MODEL: z.string().default("kimi-k3"),
-  LOUPE_REASONING: z.enum(["low", "medium", "high"]).default("low"),
+  // Movable defaults: an unset input yields "" → undefined here, so a value in
+  // .loupe.json can win. Precedence (input → file → builtin) resolves below.
+  LOUPE_HARNESS: optionalInput,
+  LOUPE_MODEL: optionalInput,
+  LOUPE_REASONING: optionalInput,
   LOUPE_PROMPT_FILE: z.string().optional(),
   LOUPE_CONVENTION_PATHS: z
     .string()
@@ -31,10 +42,10 @@ const envSchema = z.object({
   LOUPE_CREDENTIAL_PROVIDERS: z.string().default("env"),
   LOUPE_INFISICAL_ENV: z.string().optional(),
   LOUPE_INFISICAL_PROJECT_ID: z.string().optional(),
-  LOUPE_DIR: z.string().optional(),
+  LOUPE_DIR: optionalInput,
   LOUPE_CONFIG: z.string().optional(),
   LOUPE_REVIEWER: z.string().optional(),
-  LOUPE_PROFILE: z.enum(["quiet", "chill", "assertive"]).default("chill"),
+  LOUPE_PROFILE: optionalInput,
   LOUPE_VERIFY: z
     .enum(["true", "false"])
     .default("true")
@@ -45,8 +56,33 @@ const envSchema = z.object({
     .transform((v) => v === "true"),
   LOUPE_ENSEMBLE: z.string().default(""),
   LOUPE_SKILLS: z.string().default(""),
-  LOUPE_TIMEZONE: z.string().default("UTC"),
+  LOUPE_TIMEZONE: optionalInput,
+  LOUPE_MAX_TURNS: optionalInput,
 });
+
+function asMaxTurns(v: string | undefined): number | undefined {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid max-turns "${v}". Use a positive integer.`);
+  }
+  return n;
+}
+
+const REASONING = ["low", "medium", "high"] as const;
+const PROFILES = ["quiet", "chill", "assertive"] as const;
+
+function asReasoning(v: string | undefined): ReasoningEffort | undefined {
+  if (v === undefined) return undefined;
+  if ((REASONING as readonly string[]).includes(v)) return v as ReasoningEffort;
+  throw new Error(`Invalid reasoning "${v}". Use: ${REASONING.join(", ")}`);
+}
+
+function asProfile(v: string | undefined): Profile | undefined {
+  if (v === undefined) return undefined;
+  if ((PROFILES as readonly string[]).includes(v)) return v as Profile;
+  throw new Error(`Invalid profile "${v}". Use: ${PROFILES.join(", ")}`);
+}
 
 export type Config = {
   readonly token: string;
@@ -69,6 +105,8 @@ export type Config = {
   readonly ensembleModels: readonly string[];
   readonly skills: readonly string[];
   readonly timezone: string;
+  readonly whipConfig?: WhipConfig;
+  readonly maxTurns?: number;
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -81,26 +119,33 @@ export function loadConfig(): Config {
   // own cwd (the composite action runs from its own directory).
   const inWorkspace = (p: string): string => resolve(workdir, p);
 
+  const configPath = env.LOUPE_CONFIG
+    ? inWorkspace(env.LOUPE_CONFIG)
+    : undefined;
+  // Top-level review defaults from .loupe.json. Precedence for the movable
+  // settings: Action input (explicit) → file → loupe's built-in default.
+  const file: LoupeSettings = configPath ? loadSettings(configPath) : {};
+
   return {
     token: env.GITHUB_TOKEN,
     owner,
     repo,
     pullNumber: resolvePullNumber(env.LOUPE_PR_NUMBER, env.GITHUB_EVENT_PATH),
-    harnessName: env.LOUPE_HARNESS,
+    harnessName: env.LOUPE_HARNESS ?? file.harness ?? "whip",
     workdir,
     conventionPaths: env.LOUPE_CONVENTION_PATHS.split(",")
       .map((p) => p.trim())
       .filter(Boolean),
     providers: buildProviders(env),
-    subdir: env.LOUPE_DIR,
-    model: env.LOUPE_MODEL,
-    reasoning: env.LOUPE_REASONING,
+    subdir: env.LOUPE_DIR ?? file.dir,
+    model: env.LOUPE_MODEL ?? file.model ?? "kimi-k3",
+    reasoning: asReasoning(env.LOUPE_REASONING) ?? file.reasoning ?? "low",
     guidance: env.LOUPE_PROMPT_FILE
       ? readFileSync(inWorkspace(env.LOUPE_PROMPT_FILE), "utf8")
       : undefined,
-    configPath: env.LOUPE_CONFIG ? inWorkspace(env.LOUPE_CONFIG) : undefined,
+    configPath,
     reviewerFilter: env.LOUPE_REVIEWER,
-    profile: env.LOUPE_PROFILE,
+    profile: asProfile(env.LOUPE_PROFILE) ?? file.profile ?? "chill",
     verify: env.LOUPE_VERIFY,
     full: env.LOUPE_FULL,
     ensembleModels: env.LOUPE_ENSEMBLE.split(",")
@@ -109,7 +154,9 @@ export function loadConfig(): Config {
     skills: env.LOUPE_SKILLS.split(",")
       .map((s) => s.trim())
       .filter(Boolean),
-    timezone: env.LOUPE_TIMEZONE,
+    timezone: env.LOUPE_TIMEZONE ?? file.timezone ?? "UTC",
+    maxTurns: asMaxTurns(env.LOUPE_MAX_TURNS) ?? file.maxTurns,
+    whipConfig: file.whip,
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,
   };
