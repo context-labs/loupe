@@ -37,6 +37,7 @@ export type RunInput = {
   readonly skills?: readonly string[];
   readonly timezone?: string;
   readonly whipConfig?: WhipConfig;
+  readonly maxTurns?: number;
   readonly logger: Logger;
 };
 
@@ -95,6 +96,7 @@ export async function reviewPullRequest(
     ensembleModels: input.ensembleModels,
     skills: input.skills,
     timezone: input.timezone,
+    maxTurns: input.maxTurns,
     logger,
   });
 }
