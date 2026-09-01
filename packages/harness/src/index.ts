@@ -45,6 +45,8 @@ export type HarnessContext = {
   readonly env: Record<string, string>;
   /** whip provider/model catalog to materialize into a throwaway WHIP_HOME. */
   readonly whipConfig?: WhipConfig;
+  /** Cap on the agentic tool loop; harness default (40) when unset. */
+  readonly maxTurns?: number;
   readonly logger: Logger;
 };
 
@@ -287,7 +289,8 @@ export function whipHarness(): Harness {
     review: (ctx) => {
       // Agentic reviews need room to explore the checkout with tools; headless
       // diff-only reviews should answer in one turn, capped as a safety net.
-      const maxTurns = ctx.agentic ? "40" : "10";
+      // The agentic cap is configurable (config.json maxTurns / --max-turns).
+      const maxTurns = ctx.agentic ? String(ctx.maxTurns ?? 40) : "10";
       const args = [
         "run",
         "--format",

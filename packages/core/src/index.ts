@@ -93,6 +93,8 @@ export type ReviewRequest = {
   readonly skills?: readonly string[];
   /** Timezone label for the review's environment line (e.g. "PST"). */
   readonly timezone?: string;
+  /** Cap on the agentic tool loop passed to the harness (default 40). */
+  readonly maxTurns?: number;
   readonly logger: Logger;
 };
 
@@ -291,6 +293,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
         workdir: harnessCwd,
         env: req.harnessEnv,
         whipConfig: req.whipConfig,
+        maxTurns: req.maxTurns,
         logger,
       });
     let stdout: string;
@@ -428,6 +431,7 @@ async function verifyInline(
       workdir: harnessCwd,
       env: req.harnessEnv,
       whipConfig: req.whipConfig,
+      maxTurns: req.maxTurns,
       logger: req.logger,
     });
     const verdicts = parseVerification(stdout);

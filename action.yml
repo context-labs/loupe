@@ -71,6 +71,10 @@ inputs:
     description: "Timezone label for the review environment line (e.g. PST). Overrides .loupe.json; default UTC."
     required: false
     default: ""
+  max-turns:
+    description: "Cap on the agentic tool loop. Overrides .loupe.json; default 40."
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -99,4 +103,5 @@ runs:
         LOUPE_ENSEMBLE: ${{ inputs.ensemble }}
         LOUPE_SKILLS: ${{ inputs.skills }}
         LOUPE_TIMEZONE: ${{ inputs.timezone }}
+        LOUPE_MAX_TURNS: ${{ inputs.max-turns }}
       run: bun run packages/action/src/main.ts

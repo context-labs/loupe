@@ -57,7 +57,17 @@ const envSchema = z.object({
   LOUPE_ENSEMBLE: z.string().default(""),
   LOUPE_SKILLS: z.string().default(""),
   LOUPE_TIMEZONE: optionalInput,
+  LOUPE_MAX_TURNS: optionalInput,
 });
+
+function asMaxTurns(v: string | undefined): number | undefined {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid max-turns "${v}". Use a positive integer.`);
+  }
+  return n;
+}
 
 const REASONING = ["low", "medium", "high"] as const;
 const PROFILES = ["quiet", "chill", "assertive"] as const;
@@ -96,6 +106,7 @@ export type Config = {
   readonly skills: readonly string[];
   readonly timezone: string;
   readonly whipConfig?: WhipConfig;
+  readonly maxTurns?: number;
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -144,6 +155,7 @@ export function loadConfig(): Config {
       .map((s) => s.trim())
       .filter(Boolean),
     timezone: env.LOUPE_TIMEZONE ?? file.timezone ?? "UTC",
+    maxTurns: asMaxTurns(env.LOUPE_MAX_TURNS) ?? file.maxTurns,
     whipConfig: file.whip,
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,

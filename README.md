@@ -70,7 +70,8 @@ Key flags (defaults in parens): `--harness` (whip), `--model` (kimi-k3),
 `--reasoning low|medium|high` (low), `--profile quiet|chill|assertive` (chill),
 `--config <path>` (focused reviewers), `--reviewer <name>` (run just one),
 `--prompt-file <path>` (custom guidance), `--dir` (subdir scope), `--ensemble`
-(multi-model majority), `--timezone`, `--no-verify`, `--no-agentic`,
+(multi-model majority), `--timezone`, `--max-turns` (agentic loop cap),
+`--no-verify`, `--no-agentic`,
 `--providers env,dotenv,infisical`, `--dry-run`.
 
 Use `--dry-run` (with `LOG_LEVEL=debug` to see raw harness output) to compute and
@@ -111,8 +112,9 @@ Per-reviewer keys: `prompt`/`promptFile`, `include`/`exclude`, `model`,
 ### Top-level config — keep review policy out of the workflow
 
 The config file also carries the **review defaults** that used to be repeated in
-every workflow file: `harness`, `model`, `reasoning`, `profile`, `timezone`, and
-`dir`. Precedence is **Action input / CLI flag → `.loupe.json` → built-in
+every workflow file: `harness`, `model`, `reasoning`, `profile`, `timezone`,
+`dir`, and `maxTurns` (the agentic tool-loop cap; also per-reviewer). Precedence
+is **Action input / CLI flag → `.loupe.json` → built-in
 default**, so a workflow can still override, but by default the policy lives with
 the repo.
 

@@ -36,6 +36,8 @@ const reviewerSchema = z
     ensemble: z.array(z.string()).optional(),
     /** Skill docs (paths to SKILL.md or a skill dir) to fold into the reviewer. */
     skills: z.array(z.string()).optional(),
+    /** Cap on the agentic tool loop for this reviewer (default 40). */
+    maxTurns: z.number().int().positive().optional(),
   })
   .refine((r) => !(r.prompt && r.promptFile), {
     message: "reviewer has both prompt and promptFile; use one",
@@ -68,6 +70,7 @@ const configSchema = z.object({
   profile: z.enum(["quiet", "chill", "assertive"]).optional(),
   timezone: z.string().optional(),
   dir: z.string().optional(),
+  maxTurns: z.number().int().positive().optional(),
   whip: whipConfigSchema.optional(),
 });
 
@@ -80,6 +83,7 @@ export type LoupeSettings = {
   readonly profile?: Profile;
   readonly timezone?: string;
   readonly dir?: string;
+  readonly maxTurns?: number;
   readonly whip?: z.infer<typeof whipConfigSchema>;
 };
 
@@ -94,6 +98,7 @@ export function loadSettings(configPath: string): LoupeSettings {
     profile: c.profile,
     timezone: c.timezone,
     dir: c.dir,
+    maxTurns: c.maxTurns,
     whip: c.whip,
   };
 }
@@ -111,6 +116,7 @@ export type Reviewer = {
   readonly pathInstructions?: readonly { glob: string; instruction: string }[];
   readonly ensemble?: readonly string[];
   readonly skills?: readonly string[];
+  readonly maxTurns?: number;
 };
 
 /**
@@ -141,5 +147,6 @@ export function loadReviewers(configPath: string): Reviewer[] {
     ensemble: r.ensemble,
     // Top-level skills apply to every reviewer, plus any reviewer-specific ones.
     skills: [...new Set([...topSkills, ...(r.skills ?? [])])],
+    maxTurns: r.maxTurns,
   }));
 }

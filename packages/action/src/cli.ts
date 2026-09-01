@@ -116,6 +116,12 @@ program
     "--skills <paths>",
     "comma-separated skill paths (SKILL.md or skill dir) to fold into the reviewer",
   )
+  .option("--max-turns <n>", "cap the agentic tool loop (default 40)", (v) => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0)
+      throw new Error(`Invalid --max-turns "${v}". Use a positive integer.`);
+    return n;
+  })
   .option("--no-verify", "skip the second-opinion verification pass")
   .option(
     "--full",
@@ -143,6 +149,7 @@ program
         agentic: boolean;
         profile?: string;
         timezone?: string;
+        maxTurns?: number;
         ensemble?: string;
         skills?: string;
         verify: boolean;
@@ -168,6 +175,7 @@ program
         );
         const timezone = opts.timezone ?? settings.timezone ?? "UTC";
         const subdir = opts.dir ?? settings.dir;
+        const maxTurns = opts.maxTurns ?? settings.maxTurns;
         const ensembleModels = opts.ensemble
           ? opts.ensemble
               .split(",")
@@ -202,6 +210,7 @@ program
           ensembleModels,
           skills,
           timezone,
+          maxTurns,
           whipConfig: settings.whip,
         };
 
@@ -232,6 +241,7 @@ program
               pathInstructions: r.pathInstructions,
               ensembleModels: r.ensemble ?? ensembleModels,
               skills: r.skills ?? skills,
+              maxTurns: r.maxTurns ?? maxTurns,
               logger,
             });
             logger.info(`[${r.name}] ${formatResult(result)}`);
