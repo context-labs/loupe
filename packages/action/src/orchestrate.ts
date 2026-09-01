@@ -38,28 +38,32 @@ export async function runReviews(
     logger.info("Running reviewers", {
       reviewers: reviewers.map((r) => r.name),
     });
-    for (const r of reviewers) {
-      const result = await reviewPullRequest({
-        ...base,
-        reviewerName: r.name,
-        guidance: r.guidance,
-        include: r.include,
-        exclude: r.exclude,
-        agentic: r.agentic,
-        model: r.model ?? config.model,
-        reasoning: r.reasoning ?? config.reasoning,
-        profile: r.profile ?? config.profile,
-        verify: r.verify ?? config.verify,
-        pathInstructions: r.pathInstructions,
-        ensembleModels:
-          r.ensemble ??
-          (config.ensembleModels.length ? config.ensembleModels : undefined),
-        skills: [...new Set([...(r.skills ?? []), ...config.skills])],
-        timezone: config.timezone,
-        logger,
-      });
-      logger.info(`[${r.name}] ${formatResult(result)}`);
-    }
+    // Reviewers are independent (each posts its own labeled review), so run them
+    // concurrently — wall-clock becomes the slowest reviewer, not their sum.
+    await Promise.all(
+      reviewers.map(async (r) => {
+        const result = await reviewPullRequest({
+          ...base,
+          reviewerName: r.name,
+          guidance: r.guidance,
+          include: r.include,
+          exclude: r.exclude,
+          agentic: r.agentic,
+          model: r.model ?? config.model,
+          reasoning: r.reasoning ?? config.reasoning,
+          profile: r.profile ?? config.profile,
+          verify: r.verify ?? config.verify,
+          pathInstructions: r.pathInstructions,
+          ensembleModels:
+            r.ensemble ??
+            (config.ensembleModels.length ? config.ensembleModels : undefined),
+          skills: [...new Set([...(r.skills ?? []), ...config.skills])],
+          timezone: config.timezone,
+          logger,
+        });
+        logger.info(`[${r.name}] ${formatResult(result)}`);
+      }),
+    );
     return;
   }
 
