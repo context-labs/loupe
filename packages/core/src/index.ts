@@ -93,7 +93,7 @@ export type ReviewRequest = {
   readonly skills?: readonly string[];
   /** Timezone label for the review's environment line (e.g. "PST"). */
   readonly timezone?: string;
-  /** Cap on the agentic tool loop passed to the harness (default 40). */
+  /** Cap on the agentic tool loop passed to the harness (default 10). */
   readonly maxTurns?: number;
   readonly logger: Logger;
 };
