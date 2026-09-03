@@ -98,6 +98,7 @@ async function runFix(
     env,
     whipConfig: config.whipConfig,
     maxTurns: config.maxTurns,
+    cacheKey: `loupe/${config.owner}/${config.repo}/fix`,
     logger,
   });
 
@@ -222,6 +223,7 @@ export async function handleComment(
       env,
       whipConfig: config.whipConfig,
       maxTurns: config.maxTurns,
+      cacheKey: `loupe/${config.owner}/${config.repo}/chat`,
       logger,
     });
     const answer = stdout.trim() || "I couldn't produce an answer for that.";

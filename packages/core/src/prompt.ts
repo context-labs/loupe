@@ -1,4 +1,4 @@
-import { renderDiff, type DiffFile } from "./diff";
+import { renderDiff, renderFileTree, type DiffFile } from "./diff";
 import type { Finding, Profile } from "./types";
 
 export type ReasoningEffort = "low" | "medium" | "high";
@@ -94,10 +94,14 @@ review on the diff in the user message.`.trim();
 
 const AGENTIC_DIRECTIVE = `
 You HAVE repository access: the full checkout is your working directory and you
-may use your tools to read files. Use them deliberately to assess real-world
-impact — inspect the actual schema/table definitions, related migrations, model
-and query code, and existing indexes/constraints the diff interacts with. Ground
-each finding in what you actually found in the codebase, not just the diff.
+may use your tools to read files. The user message gives you the LIST of changed
+files (not the full diff) and the path to a file holding the complete diff —
+read each changed file's hunks from there on demand, then inspect the
+surrounding code. Investigate only what the change touches; do not slurp the
+whole diff or unrelated files into context. Use your tools deliberately to
+assess real-world impact — the actual schema/table definitions, related
+migrations, model and query code, and existing indexes/constraints the diff
+interacts with. Ground each finding in what you actually found, not a guess.
 
 Use SUBAGENTS heavily. Fan out independent investigations in parallel — one
 subagent per file, per suspected issue, or per question — instead of exploring
@@ -195,23 +199,39 @@ export type UserPromptInput = {
   readonly pathInstructions?: readonly string[];
   /** Timezone label for the environment line (e.g. "PST"). */
   readonly timezone?: string;
+  /**
+   * Absolute path to a file holding the full unified diff. When set (agentic
+   * reviews with a real checkout), the message carries only the changed-file
+   * TREE and points the agent at this file to read hunks on demand — the diff
+   * is not inlined, so it isn't re-sent in every turn. Omit for headless
+   * reviews, where the full diff must be inlined.
+   */
+  readonly diffPath?: string;
 };
 
-/** The per-PR user message: environment, metadata, per-path notes, and the diff.
- * Repo conventions live in the system prompt (stable/cacheable), not here. */
+/** The per-PR user message: environment, metadata, per-path notes, and either
+ * the full inline diff (headless) or a changed-file tree + a pointer to the
+ * diff file the agent reads on demand (agentic). Repo conventions live in the
+ * system prompt (stable/cacheable), not here. */
 export function buildUserPrompt(input: UserPromptInput): string {
   const pathNotes = input.pathInstructions?.length
     ? `Extra instructions for some of the changed files:\n${input.pathInstructions
         .map((i) => `- ${i}`)
         .join("\n")}`
     : "";
+  const diffSection = input.diffPath
+    ? [
+        "Changed files (the full diff is NOT inlined — explore it yourself):",
+        renderFileTree(input.files),
+        `The complete unified diff is written to \`${input.diffPath}\`. For each file you review, read its hunks from that file (e.g. with grep/sed by the \`### <path>\` header) and inspect the surrounding code in the checkout. Read only what the change touches — do not read the whole diff up front.`,
+      ].join("\n\n")
+    : ["Diff under review:", renderDiff(input.files)].join("\n\n");
   return [
     environmentLine(input.timezone),
     `PR title: ${input.title}`,
     input.description ? `PR description:\n${input.description}` : "",
     pathNotes,
-    "Diff under review:",
-    renderDiff(input.files),
+    diffSection,
   ]
     .filter(Boolean)
     .join("\n\n");
