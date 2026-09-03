@@ -47,6 +47,9 @@ export type HarnessContext = {
   readonly whipConfig?: WhipConfig;
   /** Cap on the agentic tool loop; harness default (10) when unset. */
   readonly maxTurns?: number;
+  /** Stable prompt-cache key (e.g. repo/reviewer) so the provider reuses the
+   * cached system prefix across runs. Passed to whip as -cache-key. */
+  readonly cacheKey?: string;
   readonly logger: Logger;
 };
 
@@ -303,6 +306,8 @@ export function whipHarness(): Harness {
         ctx.systemPrompt,
       ];
       if (ctx.model) args.push("-m", ctx.model);
+      // Stable cache key → the provider reuses the cached prefix across runs.
+      if (ctx.cacheKey) args.push("-cache-key", ctx.cacheKey);
       const whipEnv = ctx.whipConfig ? materializeWhipHome(ctx.whipConfig) : {};
       return runWhipStreaming(args, {
         ...ctx,

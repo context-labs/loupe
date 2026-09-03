@@ -1,4 +1,11 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Harness, WhipConfig } from "@loupe/harness";
@@ -28,7 +35,24 @@ import {
   buildVerifyUserPrompt,
   type ReasoningEffort,
 } from "./prompt";
+import { renderDiff, type DiffFile } from "./diff";
 import { validateFindings } from "./validate";
+
+/**
+ * Write the full unified diff to a throwaway temp file and return its path, so
+ * an agentic review can read hunks from it on demand instead of carrying the
+ * whole diff inline in every turn's prompt.
+ */
+function writeDiffFile(files: readonly DiffFile[], logger: Logger): string {
+  const dir = mkdtempSync(join(tmpdir(), "loupe-diff-"));
+  const path = join(dir, "pr.diff");
+  writeFileSync(path, renderDiff(files));
+  logger.debug("Wrote diff file for agentic exploration", {
+    path,
+    files: files.length,
+  });
+  return path;
+}
 
 export * from "./types";
 export * from "./diff";
@@ -232,14 +256,6 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     skills,
     conventions: conventions.text,
   });
-  const userPrompt = buildUserPrompt({
-    title: pull.title,
-    description: pull.description,
-    files,
-    pathInstructions,
-    timezone: req.timezone,
-  });
-
   // The harness runs where the repo is checked out. Scope to the subdir only if
   // it actually exists on disk; fall back to the workdir (or cwd) so a run
   // without a local checkout — the whole diff is in the prompt — still spawns.
@@ -256,6 +272,27 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       { scoped, fallbackCwd: harnessCwd },
     );
   }
+
+  // Agentic reviews with a real checkout get a changed-file TREE plus a diff
+  // file to explore — so the (often huge) diff isn't inlined into every turn.
+  // Headless reviews (and agentic with no checkout) inline the full diff.
+  const treeMode = agentic && existsSync(scoped);
+  const diffPath = treeMode ? writeDiffFile(files, logger) : undefined;
+  const commonPrompt = {
+    title: pull.title,
+    description: pull.description,
+    files,
+    pathInstructions,
+    timezone: req.timezone,
+  };
+  const headlessUserPrompt = buildUserPrompt(commonPrompt);
+  const agenticUserPrompt = diffPath
+    ? buildUserPrompt({ ...commonPrompt, diffPath })
+    : headlessUserPrompt;
+
+  // Stable prompt-cache key per repo+reviewer so whip reuses the cached system
+  // prefix across runs (and its own turns within a run).
+  const cacheKey = `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}`;
 
   // Noise profile: hard-filter by severity (the prompt asks too, this enforces).
   const keep = new Set(severitiesForProfile(profile));
@@ -287,13 +324,14 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
               skills,
               conventions: conventions.text,
             }),
-        userPrompt,
+        userPrompt: useAgentic ? agenticUserPrompt : headlessUserPrompt,
         model,
         agentic: useAgentic,
         workdir: harnessCwd,
         env: req.harnessEnv,
         whipConfig: req.whipConfig,
         maxTurns: req.maxTurns,
+        cacheKey,
         logger,
       });
     let stdout: string;
@@ -432,6 +470,7 @@ async function verifyInline(
       env: req.harnessEnv,
       whipConfig: req.whipConfig,
       maxTurns: req.maxTurns,
+      cacheKey: `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`,
       logger: req.logger,
     });
     const verdicts = parseVerification(stdout);
