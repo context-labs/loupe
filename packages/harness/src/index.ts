@@ -306,12 +306,27 @@ export function whipHarness(): Harness {
         ctx.systemPrompt,
       ];
       if (ctx.model) args.push("-m", ctx.model);
-      // Stable cache key → the provider reuses the cached prefix across runs.
-      if (ctx.cacheKey) args.push("-cache-key", ctx.cacheKey);
       const whipEnv = ctx.whipConfig ? materializeWhipHome(ctx.whipConfig) : {};
-      return runWhipStreaming(args, {
-        ...ctx,
-        env: { ...ctx.env, ...whipEnv },
+      const runCtx = { ...ctx, env: { ...ctx.env, ...whipEnv } };
+      // Stable cache key → the provider reuses the cached prefix across runs.
+      // Tolerate an older whip that predates the flag: on "flag not defined:
+      // -cache-key", retry without it (caching off, but the review still runs).
+      const withKey = ctx.cacheKey
+        ? [...args, "-cache-key", ctx.cacheKey]
+        : args;
+      return runWhipStreaming(withKey, runCtx).catch((err: unknown) => {
+        if (
+          ctx.cacheKey &&
+          /flag provided but not defined: -cache-key/.test(String(err))
+        ) {
+          ctx.logger
+            .child("whip")
+            .warn(
+              "whip does not support -cache-key; retrying without it. Upgrade whip to enable prompt caching.",
+            );
+          return runWhipStreaming(args, runCtx);
+        }
+        throw err;
       });
     },
   };
