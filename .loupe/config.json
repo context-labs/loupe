@@ -2,7 +2,7 @@
   "harness": "whip",
   "model": "kimi-k3",
   "timezone": "PST",
-  "maxTurns": 5,
+  "maxTurns": 2,
   "whip": {
     "provider": {
       "name": "inference-net",
@@ -23,9 +23,16 @@
     {
       "name": "code",
       "promptFile": "reviewers/code.md",
-      "include": ["packages/**/*.ts", "action.yml"],
-      "exclude": ["**/*.test.ts", "**/tests/**", "**/dist/**"],
-      "reasoning": "medium"
+      "include": [
+        "packages/**/*.ts",
+        "action.yml"
+      ],
+      "exclude": [
+        "**/*.test.ts",
+        "**/tests/**",
+        "**/dist/**"
+      ],
+      "reasoning": "low"
     }
   ]
 }
