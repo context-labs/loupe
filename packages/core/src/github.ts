@@ -78,29 +78,37 @@ export function getSelfLogin(octokit: Octokit): Promise<string> {
 }
 
 /**
- * The head SHA this reviewer last reviewed, read from the sha stamped in its
- * most recent review's marker. Undefined if it has never reviewed this PR.
+ * The head SHA this reviewer last reviewed, read from its persistent summary
+ * comment. Legacy review-body markers remain a fallback for existing PRs.
  */
 export async function getLastReviewedSha(
   octokit: Octokit,
   ref: PullRef,
   reviewerName: string | undefined,
 ): Promise<string | undefined> {
-  const prefix = markerPrefix(reviewerName);
   try {
     const self = await getSelfLogin(octokit);
+    const comments = await listIssueComments(octokit, ref);
+    for (const comment of comments.reverse()) {
+      if (comment.user?.login !== self) continue;
+      const sha = shaFromMarker(
+        comment.body,
+        summaryMarkerPrefix(reviewerName),
+      );
+      if (sha) return sha;
+    }
+
     const reviews = await octokit.paginate(octokit.pulls.listReviews, {
       ...ref,
       per_page: 100,
     });
-    for (const r of reviews.reverse()) {
-      if (r.user?.login === self && r.body?.includes(prefix)) {
-        const m = /sha=([0-9a-f]{7,40})/.exec(r.body);
-        if (m) return m[1];
-      }
+    for (const review of reviews.reverse()) {
+      if (review.user?.login !== self) continue;
+      const sha = shaFromMarker(review.body, markerPrefix(reviewerName));
+      if (sha) return sha;
     }
   } catch {
-    // treat as no prior review
+    // Treat lookup failures as no prior review; posting can still proceed.
   }
   return undefined;
 }
@@ -176,13 +184,39 @@ export async function fetchConventions(
   return { text: parts.join("\n\n---\n\n"), found };
 }
 
-/** Per-reviewer marker prefix; the sha is appended per run. Comments and the
- * review body carry it so a later run can find and clean up its own output. */
+/** Per-reviewer marker prefixes for inline findings and the persistent summary. */
 function markerPrefix(reviewerName: string | undefined): string {
   return `<!-- loupe:${reviewerName ?? "default"} `;
 }
+function summaryMarkerPrefix(reviewerName: string | undefined): string {
+  return `<!-- loupe:summary:${reviewerName ?? "default"} `;
+}
 function makeMarker(reviewerName: string | undefined, sha: string): string {
   return `${markerPrefix(reviewerName)}sha=${sha} -->`;
+}
+function makeSummaryMarker(
+  reviewerName: string | undefined,
+  sha: string,
+): string {
+  return `${summaryMarkerPrefix(reviewerName)}sha=${sha} -->`;
+}
+function shaFromMarker(
+  body: string | null | undefined,
+  prefix: string,
+): string | undefined {
+  if (!body) return undefined;
+  const start = body.indexOf(prefix);
+  if (start < 0) return undefined;
+  return /sha=([0-9a-f]{7,40})\s*-->/.exec(body.slice(start))?.[1];
+}
+
+async function listIssueComments(octokit: Octokit, ref: PullRef) {
+  return octokit.paginate(octokit.issues.listComments, {
+    owner: ref.owner,
+    repo: ref.repo,
+    issue_number: ref.pull_number,
+    per_page: 100,
+  });
 }
 
 /**
@@ -306,11 +340,11 @@ function renderReviewBody(
 }
 
 /**
- * Post one review with inline comments. Uses REQUEST_CHANGES when any inline
+ * Post inline findings as an empty-body review and create or update this
+ * reviewer's persistent issue-comment summary. Uses REQUEST_CHANGES when any
  * finding is a blocker, otherwise COMMENT — never APPROVE (a bot shouldn't be a
- * required approver). Off-diff findings are appended to the summary body. First
- * clears this reviewer's comments from the previous run so re-reviews replace
- * rather than accumulate.
+ * required approver). Prior inline comments are cleared before replacements are
+ * posted; off-diff findings remain in the summary.
  */
 export type PostReviewOptions = {
   readonly reviewerName?: string;
@@ -346,16 +380,56 @@ export async function postReview(
     ? `loupe · ${opts.reviewerName}`
     : "loupe review";
   const tag = makeMarker(opts.reviewerName, opts.headSha);
+  const summaryTag = makeSummaryMarker(opts.reviewerName, opts.headSha);
+  const shortSha = opts.headSha.slice(0, 7);
+  const lastReviewed = `Last reviewed commit: [\`${shortSha}\`](https://github.com/${ref.owner}/${ref.repo}/commit/${opts.headSha})`;
   const stats = statLine(inline, review, opts.fileCount);
+  const summaryBody = renderReviewBody(
+    title,
+    stats,
+    review,
+    inline,
+    dropped,
+    `${lastReviewed}\n\n${summaryTag}`,
+  );
 
-  await octokit.pulls.createReview({
-    ...ref,
-    event: hasBlocker ? "REQUEST_CHANGES" : "COMMENT",
-    body: renderReviewBody(title, stats, review, inline, dropped, tag),
-    comments: inline.map((f) => ({
-      path: f.path,
-      line: f.line,
-      body: `${SEV_EMOJI[f.severity]} **${f.severity}** ${f.body}\n\n${tag}`,
-    })),
-  });
+  if (inline.length > 0 || hasBlocker) {
+    await octokit.pulls.createReview({
+      ...ref,
+      event: hasBlocker ? "REQUEST_CHANGES" : "COMMENT",
+      // GitHub requires content when a review has no inline comments. Keep that
+      // body visually empty while preserving PR-level blocker verdicts.
+      body: inline.length > 0 ? "" : tag,
+      comments: inline.map((f) => ({
+        path: f.path,
+        line: f.line,
+        body: `${SEV_EMOJI[f.severity]} **${f.severity}** ${f.body}\n\n${tag}`,
+      })),
+    });
+  }
+
+  const self = await getSelfLogin(octokit);
+  const comments = await listIssueComments(octokit, ref);
+  const prior = comments
+    .reverse()
+    .find(
+      (comment) =>
+        comment.user?.login === self &&
+        comment.body?.includes(summaryMarkerPrefix(opts.reviewerName)),
+    );
+  if (prior) {
+    await octokit.issues.updateComment({
+      owner: ref.owner,
+      repo: ref.repo,
+      comment_id: prior.id,
+      body: summaryBody,
+    });
+  } else {
+    await octokit.issues.createComment({
+      owner: ref.owner,
+      repo: ref.repo,
+      issue_number: ref.pull_number,
+      body: summaryBody,
+    });
+  }
 }

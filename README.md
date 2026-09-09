@@ -41,7 +41,8 @@ pull_request event  (or `loupe review` locally, or an @loupe comment)
   └─ @loupe/action        reads config from env/flags, resolves harness credentials
        ├─ @loupe/core     fetch PR + conventions → build prompt → run harness →
        │                  parse + validate findings against the diff →
-       │                  POST /pulls/{n}/reviews (inline comments + rich body)
+       │                  POST /pulls/{n}/reviews (inline comments, empty body)
+       │                  POST/PATCH /issues/{n}/comments (persistent summary)
        ├─ @loupe/harness  the agent CLI as a subprocess (whip, claude, codex, …)
        └─ @loupe/credentials  provider chain: env → dotenv → infisical → your own
 ```

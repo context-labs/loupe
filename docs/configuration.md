@@ -127,15 +127,15 @@ Two scopes:
 
 ## What a review looks like
 
-loupe posts a real GitHub **review** (not a plain comment): a structured body
-plus inline, line-anchored comments. The review synthesizes — high-level
-summary, risks, bugs — rather than restating the diff (no file-by-file
-walkthrough).
+loupe posts inline, line-anchored findings as a real GitHub **review** with an
+empty body. It separately maintains one summary issue comment per reviewer,
+updating that comment in place on every re-review so stale summaries do not
+accumulate in the timeline.
 
-- **Body** — a stat line (🔴/🟡/🔵 counts · files), the summary, a **Concerns**
-  section (PR-level risks not tied to a line), optional **Highlights**, an
-  optional Mermaid diagram (only for a genuinely complex flow), and an "Other
-  notes" section for findings that couldn't be anchored.
+- **Summary comment** — a stat line (🔴/🟡/🔵 counts · files), the summary, a
+  **Concerns** section (PR-level risks not tied to a line), optional
+  **Highlights**, an optional Mermaid diagram (only for a genuinely complex
+  flow), and an "Other notes" section for findings that couldn't be anchored.
 - **Inline comments** — one per `finding`, on the exact diff line. If the model's
   line is a few off (common in agentic mode), loupe **snaps it to the nearest
   commentable line** rather than demoting it to a note, so findings land inline.

@@ -39,8 +39,10 @@ CLI, env vars, or `.loupe.json` — those live in `action`.
    `path:line` is in the diff) and `dropped` (off-diff → summary notes). This is
    what prevents a hallucinated line from 422-ing the whole review.
 8. **Post** — dry-run logs and returns; otherwise `postReview` deletes this
-   reviewer's prior comments (marker-based de-dup) and creates one review with
-   inline comments + summary, `REQUEST_CHANGES` if any blocker else `COMMENT`.
+   reviewer's prior inline comments, creates an empty-body review containing the
+   new inline findings, and creates or updates the reviewer's marker-identified
+   summary issue comment. Blockers produce `REQUEST_CHANGES`; other inline
+   reviews use `COMMENT`.
 
 ### core files
 

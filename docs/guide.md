@@ -9,9 +9,9 @@
 4. Runs a harness (an agent CLI) to produce findings as JSON.
 5. Validates each finding's `path:line` against the diff — off-diff findings
    degrade to summary notes so a bad line never rejects the review.
-6. Posts one review per reviewer: inline comments + a summary, with a
-   `REQUEST_CHANGES` verdict if any inline finding is a `blocker`, else
-   `COMMENT`. Never `APPROVE`.
+6. Posts inline findings in an empty-body review and creates or updates one
+   persistent summary issue comment per reviewer. Inline blockers produce a
+   `REQUEST_CHANGES` verdict; other inline reviews use `COMMENT`. Never `APPROVE`.
 
 ## Install
 
