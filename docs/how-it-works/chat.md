@@ -61,7 +61,7 @@ sequenceDiagram
     alt head repo is a fork
         L->>GH: comment "can't push to a fork"
     else
-        L->>G: fetch origin <head>; checkout -B <head> FETCH_HEAD
+        L->>G: fetch origin <head>, then checkout -B <head> FETCH_HEAD
         L->>GH: pulls.listFiles
         L->>W: agentic, fix prompt + instruction + changed-file list
         W->>G: edit files

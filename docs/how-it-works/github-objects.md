@@ -19,7 +19,7 @@ sequenceDiagram
     participant L as loupe
     participant GH as GitHub API
     L->>GH: users.getAuthenticated
-    Note over L,GH: Actions token cannot; falls back to github-actions[bot]
+    Note over L,GH: Actions token cannot, so it falls back to github-actions[bot]
     L->>GH: pulls.listReviewComments
     loop each prior comment by me, with my marker, on a refreshed path
         L->>GH: pulls.deleteReviewComment
