@@ -72,7 +72,8 @@ and only works on same-repo branches, not forks.
 
 `harness`, `model`, `reasoning`, `profile`, `verify`, `full`, `prompt-file`,
 `config`, `reviewer`, `dir`, `convention-paths`, `credential-providers`,
-`github-token`. Each maps to a `LOUPE_*` env var (see below); config/prompt
+`ensemble`, `skills`, `timezone`, `max-turns`, `prior-comments` (default
+`resolve`), `github-token`. Each maps to a `LOUPE_*` env var (see below); config/prompt
 paths resolve against `GITHUB_WORKSPACE` (the checkout), not the action's own
 directory.
 
@@ -83,7 +84,9 @@ The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
 `LOUPE_PR_NUMBER`, `LOUPE_HARNESS`, `LOUPE_MODEL`, `LOUPE_REASONING`,
 `LOUPE_PROMPT_FILE`, `LOUPE_CONFIG`, `LOUPE_REVIEWER`, `LOUPE_DIR`,
 `LOUPE_CONVENTION_PATHS`, `LOUPE_CREDENTIAL_PROVIDERS`, `LOUPE_INFISICAL_ENV`,
-`LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`.
+`LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`,
+`LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
+`LOUPE_PRIOR_COMMENTS`.
 Comment/chat mode is auto-detected from `GITHUB_EVENT_NAME` (`issue_comment` /
 `pull_request_review_comment`), which the runner sets.
 
