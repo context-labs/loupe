@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,7 +25,8 @@ const logger = {
 };
 logger.child.mockReturnValue(logger);
 
-const patchA = "@@ -1,2 +1,3 @@\n line\n+changed in A\n line2";
+const patchA =
+  "@@ -1,2 +1,3 @@\n line\n+export async function selectThing() {}\n line2";
 const patchB = "@@ -10,2 +10,3 @@\n line\n+changed in B\n line2";
 const prFiles = [
   { filename: "svc/a.ts", patch: patchA },
@@ -30,7 +37,11 @@ const marker = `<!-- loupe:code sha=${SHA_A} -->`;
 /** A checkout with the `svc` subdir so the review runs in tree mode. */
 function checkout(): string {
   const dir = mkdtempSync(join(tmpdir(), "loupe-e2e-"));
-  mkdirSync(join(dir, "svc"));
+  mkdirSync(join(dir, "svc", "cmd"), { recursive: true });
+  writeFileSync(
+    join(dir, "svc", "cmd", "run.ts"),
+    "await withProgress(() => selectThing());\n",
+  );
   return dir;
 }
 
@@ -238,6 +249,13 @@ describe("runReview end to end", () => {
     expect(focus).not.toContain("- svc/a.ts");
     expect(agenticCtx.userPrompt).toContain("- svc/a.ts (+1 −0)");
     expect(agenticCtx.userPrompt).toContain("Your working directory is `svc/`");
+    // Callers of the changed export were located mechanically and rendered
+    // with repo-relative paths.
+    expect(agenticCtx.userPrompt).toContain("Call sites of changed exports");
+    expect(agenticCtx.userPrompt).toContain(
+      "- svc/cmd/run.ts:1  await withProgress(() => selectThing());",
+    );
+    expect(agenticCtx.systemPrompt).toContain("Procedure — do these before");
 
     // The verify pass ran headless over the one in-scope finding.
     expect(contexts[1]!.agentic).toBe(false);
@@ -304,7 +322,9 @@ describe("runReview end to end", () => {
 
     expect(contexts.map((c) => c.agentic)).toEqual([true, false, false]);
     expect(contexts[1]!.userPrompt).toContain("Diff under review:");
-    expect(contexts[1]!.userPrompt).toContain("+changed in A");
+    expect(contexts[1]!.userPrompt).toContain(
+      "+export async function selectThing",
+    );
     expect(result.diagnostics.mode).toBe("fallback");
     expect(result.requestedChanges).toBe(true);
     expect(api.pulls.createReview).toHaveBeenCalledWith(

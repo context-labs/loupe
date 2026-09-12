@@ -38,6 +38,11 @@ import {
   buildVerifyUserPrompt,
   type ReasoningEffort,
 } from "./prompt";
+import {
+  changedExports,
+  transitiveCallSites,
+  renderCallSites,
+} from "./callsites";
 import { renderDiff, type DiffFile } from "./diff";
 import { validateFindings } from "./validate";
 
@@ -64,6 +69,7 @@ export * from "./parse";
 export * from "./validate";
 export * from "./github";
 export * from "./ensemble";
+export * from "./callsites";
 
 export type ReviewRequest = {
   /** Authenticated GitHub client; see makeOctokit. */
@@ -128,6 +134,8 @@ export type ReviewRequest = {
   readonly maxTurns?: number;
   /** What to do with this reviewer's prior inline comments (default resolve). */
   readonly priorComments?: PriorComments;
+  /** Append the always-on review procedure to the system prompt (default true). */
+  readonly procedure?: boolean;
   readonly logger: Logger;
 };
 
@@ -294,6 +302,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     reasoning: req.reasoning,
     profile,
     skills,
+    procedure: req.procedure,
     conventions: conventions.text,
   };
   const systemPrompt = buildSystemPrompt({ ...promptOpts, agentic });
@@ -320,6 +329,24 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   // with no checkout) inline only the files under review.
   const treeMode = agentic && existsSync(scoped);
   const diffPath = treeMode ? writeDiffFile(scopedFiles, logger) : undefined;
+  // Callers of the exports this diff changes, found mechanically in the
+  // checkout so the agent does not spend its turn budget grepping for them.
+  // Diff paths are repo-relative; the checkout cwd is the subdir, so strip the
+  // prefix to exclude/grep and add it back when rendering.
+  const changed = treeMode ? changedExports(scopedFiles) : [];
+  const callSites = treeMode
+    ? renderCallSites(
+        transitiveCallSites(
+          harnessCwd,
+          changed,
+          new Set(scopedFiles.map((f) => f.path.slice(prefix.length))),
+        ),
+        prefix,
+      )
+    : "";
+  if (callSites) {
+    logger.info("Located call sites of changed exports", { exports: changed });
+  }
   const commonPrompt = {
     title: pull.title,
     description: pull.description,
@@ -333,6 +360,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
         files: scopedFiles,
         diffPath,
         cwdSubdir: subdir && harnessCwd === scoped ? subdir : undefined,
+        callSites,
         focusPaths: files.length < scopedFiles.length ? [...focus] : undefined,
       })
     : headlessUserPrompt;

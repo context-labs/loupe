@@ -40,6 +40,8 @@ const reviewerSchema = z
     maxTurns: z.number().int().positive().optional(),
     /** What to do with this reviewer's prior inline comments on a re-review. */
     priorComments: z.enum(["resolve", "delete", "keep"]).optional(),
+    /** false = drop the always-on review procedure from this reviewer's prompt. */
+    procedure: z.boolean().optional(),
   })
   .refine((r) => !(r.prompt && r.promptFile), {
     message: "reviewer has both prompt and promptFile; use one",
@@ -74,6 +76,7 @@ const configSchema = z.object({
   dir: z.string().optional(),
   maxTurns: z.number().int().positive().optional(),
   priorComments: z.enum(["resolve", "delete", "keep"]).optional(),
+  procedure: z.boolean().optional(),
   whip: whipConfigSchema.optional(),
 });
 
@@ -88,6 +91,7 @@ export type LoupeSettings = {
   readonly dir?: string;
   readonly maxTurns?: number;
   readonly priorComments?: PriorComments;
+  readonly procedure?: boolean;
   readonly whip?: z.infer<typeof whipConfigSchema>;
 };
 
@@ -104,6 +108,7 @@ export function loadSettings(configPath: string): LoupeSettings {
     dir: c.dir,
     maxTurns: c.maxTurns,
     priorComments: c.priorComments,
+    procedure: c.procedure,
     whip: c.whip,
   };
 }
@@ -123,6 +128,7 @@ export type Reviewer = {
   readonly skills?: readonly string[];
   readonly maxTurns?: number;
   readonly priorComments?: PriorComments;
+  readonly procedure?: boolean;
 };
 
 /**
@@ -155,5 +161,6 @@ export function loadReviewers(configPath: string): Reviewer[] {
     skills: [...new Set([...topSkills, ...(r.skills ?? [])])],
     maxTurns: r.maxTurns,
     priorComments: r.priorComments,
+    procedure: r.procedure,
   }));
 }

@@ -42,6 +42,7 @@ export type RunInput = {
   readonly whipConfig?: WhipConfig;
   readonly maxTurns?: number;
   readonly priorComments?: PriorComments;
+  readonly procedure?: boolean;
   readonly logger: Logger;
 };
 
@@ -102,6 +103,7 @@ export async function reviewPullRequest(
     timezone: input.timezone,
     maxTurns: input.maxTurns,
     priorComments: input.priorComments,
+    procedure: input.procedure,
     logger,
   });
 }

@@ -82,3 +82,26 @@ describe("buildVerifySystemPrompt", () => {
     expect(p).not.toContain("based on code not shown");
   });
 });
+
+describe("review procedure and call sites", () => {
+  it("appends the procedure even when custom guidance replaces the default, unless disabled", () => {
+    const custom = buildSystemPrompt({ guidance: "Only hunt bugs." });
+    expect(custom).toContain("Only hunt bugs.");
+    expect(custom).toContain("Procedure — do these before writing any finding");
+    expect(
+      buildSystemPrompt({ guidance: "x", procedure: false }),
+    ).not.toContain("Procedure —");
+  });
+
+  it("renders pre-computed call sites in the user message", () => {
+    const p = buildUserPrompt({
+      title: "t",
+      description: "",
+      files,
+      diffPath: "/tmp/x/pr.diff",
+      callSites: "`login`:\n- svc/commands/harness.ts:41  await login();",
+    });
+    expect(p).toContain("Call sites of changed exports");
+    expect(p).toContain("svc/commands/harness.ts:41");
+  });
+});

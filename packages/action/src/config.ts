@@ -122,6 +122,8 @@ export type Config = {
   readonly maxTurns?: number;
   /** Explicit input/file value only; core defaults to "resolve". */
   readonly priorComments?: PriorComments;
+  /** File value only; core defaults to true. */
+  readonly procedure?: boolean;
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -173,6 +175,7 @@ export function loadConfig(): Config {
     maxTurns: asMaxTurns(env.LOUPE_MAX_TURNS) ?? file.maxTurns,
     priorComments:
       asPriorComments(env.LOUPE_PRIOR_COMMENTS) ?? file.priorComments,
+    procedure: file.procedure,
     whipConfig: file.whip,
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,

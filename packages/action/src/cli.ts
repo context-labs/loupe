@@ -271,6 +271,7 @@ program
                 skills: r.skills ?? skills,
                 maxTurns: r.maxTurns ?? maxTurns,
                 priorComments: r.priorComments ?? priorComments,
+                procedure: r.procedure ?? settings.procedure,
                 logger,
               });
               logger.info(`[${r.name}] ${formatResult(result)}`);

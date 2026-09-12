@@ -57,6 +57,27 @@ Severity rubric:
   not catastrophic.
 - "nit": minor, optional, or stylistic. Use sparingly.`.trim();
 
+/**
+ * Always-on review procedure. Appended after the guidance whether or not a
+ * custom prompt replaced the default, because custom reviewer prompts describe
+ * WHAT to look for and routinely omit HOW to check it. Consumers turn it off
+ * with `procedure: false`.
+ */
+const REVIEW_PROCEDURE = `
+Procedure — do these before writing any finding:
+1. For every exported function, method, or type whose signature OR behavior
+   changed (sync→async, pure→prompting/blocking/interactive, new side effect,
+   changed default, changed return shape), read every call site listed under
+   "Call sites of changed exports" and any others you find. Check each caller
+   still holds. A behavior change propagates: if a caller wraps the changed
+   function in a spinner, lock, transaction, retry, or timeout, ask whether
+   that wrapper is still valid.
+2. Follow one more hop when the caller is itself a thin wrapper (e.g. a
+   \`login()\` that just calls the changed function): its callers inherit the
+   change too.
+3. Only then judge the diff's own logic.
+State in the summary which callers you checked.`.trim();
+
 const OUTPUT_CONTRACT = `
 Respond with ONE JSON object and NOTHING else — no prose before or after it,
 and do not wrap the object in a Markdown code fence. "summary", "detail", and
@@ -139,6 +160,8 @@ export function buildSystemPrompt(opts: {
   profile?: Profile;
   /** Loaded skill docs (SKILL.md bodies) to fold into the reviewer's behavior. */
   skills?: readonly string[];
+  /** Append the always-on review procedure (default true). */
+  procedure?: boolean;
   /** Repo convention docs (CLAUDE.md/AGENTS.md/…). Stable per repo → kept in the
    * system prompt so it stays a cacheable prefix across PRs. */
   conventions?: string;
@@ -156,6 +179,7 @@ export function buildSystemPrompt(opts: {
   // diff, path notes, current date) lives in the user message instead.
   return [
     opts.guidance?.trim() || DEFAULT_REVIEW_GUIDANCE,
+    opts.procedure === false ? "" : REVIEW_PROCEDURE,
     skillsBlock,
     conventionsBlock,
     opts.reasoning ? REASONING_NOTE[opts.reasoning] : "",
@@ -219,6 +243,12 @@ export type UserPromptInput = {
    * in-scope PR file as context. Omitted means all of `files` are the target.
    */
   readonly focusPaths?: readonly string[];
+  /**
+   * Pre-computed callers of the exports this diff changes, outside the diff
+   * itself (see callsites.ts). Rendered so the agent spends its turns judging
+   * callers instead of locating them.
+   */
+  readonly callSites?: string;
 };
 
 /** The per-PR user message: environment, metadata, per-path notes, and either
@@ -241,6 +271,9 @@ export function buildUserPrompt(input: UserPromptInput): string {
         "The other listed files are context from the same PR. Anchor findings on the reassessed files; cite other files as supporting evidence.",
       ].join("\n")
     : "";
+  const callSitesNote = input.callSites?.trim()
+    ? `Call sites of changed exports (outside the diff, repo-relative path:line). Read each one and check it still holds:\n\n${input.callSites.trim()}`
+    : "";
   const diffSection = input.diffPath
     ? [
         "Changed files (the full diff is NOT inlined — explore it yourself):",
@@ -255,6 +288,7 @@ export function buildUserPrompt(input: UserPromptInput): string {
     input.description ? `PR description:\n${input.description}` : "",
     pathNotes,
     focusNote,
+    callSitesNote,
     diffSection,
   ]
     .filter(Boolean)
