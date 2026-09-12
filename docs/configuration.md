@@ -34,7 +34,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `include` | no | Globs; reviewer runs only when a changed file matches. **Omit = the whole PR.** |
 | `exclude` | no | Globs removed from scope (lockfiles, generated output, …). |
 | `model` | no | Overrides the run's model for this reviewer. |
-| `reasoning` | no | `low` \| `medium` \| `high`. Passed to the harness natively (whip `defaultEffort`, `claude --effort`, codex `model_reasoning_effort`) and noted in the prompt. Unset = the harness's own default. |
+| `reasoning` | no | `low` \| `medium` \| `high`. Passed to the harness natively (whip `defaultEffort` in the materialized `WHIP_HOME`, `claude --effort`, codex `model_reasoning_effort`) and noted in the prompt. Unset = the harness's own default. whip without a `whip` config block keeps its own default effort; only the prompt note applies. |
 | `agentic` | no | `false` to run one-shot; omitted = agentic (the default). |
 | `profile` | no | Noise profile: `quiet` (blockers) \| `chill` (default) \| `assertive` (all). |
 | `verify` | no | `false` to skip the verification pass (default on). |
@@ -131,7 +131,7 @@ Two scopes:
   history lookup or compare fails, loupe does a full review and touches no
   prior comment.
 - **Run details** — every summary carries a collapsed `Run details` block:
-  whether the headless fallback ran, the verification status, the scope, and
+  the review mode (agentic, headless, or fallback), the verification status, the scope, and
   how many findings were dropped as malformed, out of scope, below the noise
   profile, or rejected by verification. The stat line shows `⚠️ degraded run`
   when the review lost something.

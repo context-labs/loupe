@@ -140,7 +140,7 @@ export type ReviewResult = {
 };
 
 const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
-  fallback: false,
+  mode: "agentic",
   verify: "skipped",
   incremental: "full",
   malformedDropped: { findings: 0, concerns: 0 },
@@ -339,7 +339,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   const keep = new Set(severitiesForProfile(profile));
 
   const counts = {
-    fallback: false,
+    mode: (agentic ? "agentic" : "headless") as ReviewDiagnostics["mode"],
     malformedFindings: 0,
     malformedConcerns: 0,
     outOfScope: 0,
@@ -390,7 +390,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       logger.warn("Agentic review failed; retrying one-shot from the diff", {
         error: err instanceof Error ? err.message : String(err),
       });
-      counts.fallback = true;
+      counts.mode = "fallback";
       parsed = await run(false);
     }
     counts.malformedFindings += parsed.malformedFindings;
@@ -456,7 +456,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   }
 
   const diagnostics: ReviewDiagnostics = {
-    fallback: counts.fallback,
+    mode: counts.mode,
     verify,
     incremental,
     malformedDropped: {

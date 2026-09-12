@@ -440,8 +440,8 @@ const SEV_EMOJI: Record<Finding["severity"], string> = {
  * instead of only in the Actions log.
  */
 export type ReviewDiagnostics = {
-  /** The agentic run failed and the review came from the headless retry. */
-  readonly fallback: boolean;
+  /** How the review was produced: with tools, one-shot by design, or one-shot because the agentic run failed. */
+  readonly mode: "agentic" | "headless" | "fallback";
   /** passed = complete valid verdicts applied; skipped = nothing to verify or verify off. */
   readonly verify: "passed" | "skipped" | "invalid" | "failed";
   /** unknown = history lookup or compare failed, so a full review ran without cleanup. */
@@ -463,7 +463,7 @@ export type ReviewDiagnostics = {
 /** True when the run lost or skipped something the reader should know about. */
 export function isDegraded(d: ReviewDiagnostics): boolean {
   return (
-    d.fallback ||
+    d.mode === "fallback" ||
     d.verify === "invalid" ||
     d.verify === "failed" ||
     d.incremental === "unknown" ||
@@ -473,7 +473,9 @@ export function isDegraded(d: ReviewDiagnostics): boolean {
 
 function renderDiagnostics(d: ReviewDiagnostics): string {
   const rows = [
-    `- review: ${d.fallback ? "headless fallback (agentic run failed)" : "agentic"}`,
+    `- review: ${
+      d.mode === "fallback" ? "headless fallback (agentic run failed)" : d.mode
+    }`,
     `- verification: ${d.verify}`,
     `- scope: ${d.incremental}${d.incremental === "unknown" ? " (history lookup failed; prior comments kept)" : ""}`,
     `- dropped: ${d.malformedDropped.findings} malformed finding(s), ${d.malformedDropped.concerns} malformed concern(s), ${d.outOfScopeDropped} out of scope, ${d.profileDropped} below profile, ${d.verifyDropped} rejected by verification`,

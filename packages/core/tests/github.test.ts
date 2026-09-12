@@ -589,7 +589,7 @@ describe("summary rendering", () => {
         headSha: "d".repeat(40),
         fileCount: 1,
         diagnostics: {
-          fallback: true,
+          mode: "fallback",
           verify: "invalid",
           incremental: "unknown",
           malformedDropped: { findings: 1, concerns: 0 },

@@ -83,7 +83,7 @@ _3 inline comments on the diff below._
 
 <details><summary>Other notes (n)</summary> off-diff findings, each as its own Markdown block </details>
 
-<details><summary>Run details</summary> fallback / verification / scope / dropped counts </details>
+<details><summary>Run details</summary> mode / verification / scope / dropped counts </details>
 
 Last reviewed commit: [`abc1234`](link)
 

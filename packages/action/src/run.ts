@@ -114,7 +114,7 @@ export function formatResult(result: ReviewResult): string {
       : "") +
     (result.requestedChanges ? " — requested changes" : "") +
     (isDegraded(d)
-      ? ` — degraded (fallback=${d.fallback}, verify=${d.verify}, scope=${d.incremental}, malformed=${d.malformedDropped.findings + d.malformedDropped.concerns})`
+      ? ` — degraded (mode=${d.mode}, verify=${d.verify}, scope=${d.incremental}, malformed=${d.malformedDropped.findings + d.malformedDropped.concerns})`
       : "")
   );
 }
@@ -130,7 +130,7 @@ export function renderReview(result: ReviewResult): string {
   const d = result.diagnostics;
   const lines = [
     `\nSummary: ${result.summary}\n`,
-    `Run: fallback=${d.fallback} verify=${d.verify} scope=${d.incremental} malformed=${d.malformedDropped.findings}/${d.malformedDropped.concerns} outOfScope=${d.outOfScopeDropped} profile=${d.profileDropped} verifyDropped=${d.verifyDropped}\n`,
+    `Run: mode=${d.mode} verify=${d.verify} scope=${d.incremental} malformed=${d.malformedDropped.findings}/${d.malformedDropped.concerns} outOfScope=${d.outOfScopeDropped} profile=${d.profileDropped} verifyDropped=${d.verifyDropped}\n`,
   ];
   for (const f of [...result.inline, ...result.dropped]) {
     lines.push(`${SEVERITY_MARK[f.severity] ?? "•"} ${f.path}:${f.line}`);
