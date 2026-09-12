@@ -3,7 +3,12 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { materializeWhipHome, type WhipConfig } from "../src/index";
+import {
+  buildClaudeArgs,
+  buildCodexArgs,
+  materializeWhipHome,
+  type WhipConfig,
+} from "../src/index";
 
 const base: WhipConfig = {
   provider: {
@@ -16,11 +21,14 @@ const base: WhipConfig = {
   defaultModel: "kimi-k3",
 };
 
-function writtenConfig(cfg: WhipConfig): {
+function writtenConfig(
+  cfg: WhipConfig,
+  reasoning?: "low" | "medium" | "high",
+): {
   env: Record<string, string>;
   config: Record<string, unknown>;
 } {
-  const env = materializeWhipHome(cfg);
+  const env = materializeWhipHome(cfg, reasoning);
   const config = JSON.parse(
     readFileSync(join(env["WHIP_HOME"]!, "config.json"), "utf8"),
   ) as Record<string, unknown>;
@@ -65,5 +73,28 @@ describe("materializeWhipHome", () => {
       (config["providers"] as Record<string, { name: string }>)["inference-net"]
         ?.name,
     ).toBe("inference-net");
+  });
+
+  it("pins defaultEffort only when a reasoning effort is given", () => {
+    expect(writtenConfig(base).config).not.toHaveProperty("defaultEffort");
+    expect(writtenConfig(base, "medium").config["defaultEffort"]).toBe(
+      "medium",
+    );
+  });
+});
+
+describe("native reasoning flags", () => {
+  it("claude gets --effort, codex gets model_reasoning_effort, neither when unset", () => {
+    expect(buildClaudeArgs({ systemPrompt: "s", reasoning: "high" })).toContain(
+      "--effort",
+    );
+    expect(buildClaudeArgs({ systemPrompt: "s" })).not.toContain("--effort");
+    expect(buildCodexArgs({ reasoning: "low" })).toEqual([
+      "exec",
+      "-c",
+      "model_reasoning_effort=low",
+      "-",
+    ]);
+    expect(buildCodexArgs({})).toEqual(["exec", "-"]);
   });
 });

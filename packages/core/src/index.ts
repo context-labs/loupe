@@ -15,10 +15,12 @@ import {
   changedFilesBetween,
   fetchConventions,
   fetchPullContext,
-  getLastReviewedSha,
+  getLastReviewed,
   makeOctokit,
   postReview,
+  type PriorComments,
   type PullRef,
+  type ReviewDiagnostics,
 } from "./github";
 import { majority, mergeEnsemble } from "./ensemble";
 import { parseReviewOutput, parseVerification } from "./parse";
@@ -83,8 +85,11 @@ export type ReviewRequest = {
   readonly dryRun?: boolean;
   /** Model id passed to the harness (e.g. "kimi-k3"). */
   readonly model?: string;
-  /** Reasoning effort baked into the system prompt (default medium). */
-  readonly reasoning: ReasoningEffort;
+  /**
+   * Reasoning effort, passed to the harness natively and noted in the prompt.
+   * Omitted: the harness's own default applies and no note is added.
+   */
+  readonly reasoning?: ReasoningEffort;
   /** Custom reviewer guidance replacing the default; contract is still appended. */
   readonly guidance?: string;
   /** Named reviewer profile; labels the posted review (e.g. "migrations"). */
@@ -119,6 +124,8 @@ export type ReviewRequest = {
   readonly timezone?: string;
   /** Cap on the agentic tool loop passed to the harness (default 10). */
   readonly maxTurns?: number;
+  /** What to do with this reviewer's prior inline comments (default resolve). */
+  readonly priorComments?: PriorComments;
   readonly logger: Logger;
 };
 
@@ -129,6 +136,18 @@ export type ReviewResult = {
   readonly summary: string;
   readonly inline: readonly Finding[];
   readonly dropped: readonly Finding[];
+  readonly diagnostics: ReviewDiagnostics;
+};
+
+const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
+  fallback: false,
+  verify: "skipped",
+  incremental: "full",
+  malformedDropped: { findings: 0, concerns: 0 },
+  outOfScopeDropped: 0,
+  profileDropped: 0,
+  verifyDropped: 0,
+  offDiff: 0,
 };
 
 /** End-to-end: fetch PR + conventions, run the harness, post the review. */
@@ -180,6 +199,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     summary,
     inline: [],
     dropped: [],
+    diagnostics: CLEAN_DIAGNOSTICS,
   });
 
   if (scopedFiles.length === 0) {
@@ -189,29 +209,38 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     return emptyResult("No changed files in scope.");
   }
 
-  // Incremental review: only re-review files changed since this reviewer's last
-  // review of the PR, and only replace comments on those files (comments on
-  // untouched files are kept). Full review (--full / first run) reviews all.
+  // Incremental review: reassess only the in-scope files changed since this
+  // reviewer's last review of the PR, and clean up only comments on those
+  // files. The full in-scope PR diff still goes on disk as context. A failed
+  // history lookup or compare means "unknown": review everything but leave
+  // every prior comment alone, since we cannot tell what they covered.
   let files = scopedFiles;
-  let refreshPaths: Set<string> | undefined;
+  let refreshPaths = new Set(scopedFiles.map((f) => f.path));
+  let incremental: ReviewDiagnostics["incremental"] = "full";
   if (!req.full) {
-    const priorSha = await getLastReviewedSha(
-      octokit,
-      req.ref,
-      req.reviewerName,
-    );
-    if (priorSha && priorSha !== pull.headSha) {
+    const last = await getLastReviewed(octokit, req.ref, req.reviewerName);
+    if (last.unknown) {
+      logger.warn(
+        "Could not read prior review history; full review, keeping prior comments",
+        {
+          error: last.reason,
+        },
+      );
+      refreshPaths = new Set();
+      incremental = "unknown";
+    } else if (last.sha && last.sha !== pull.headSha) {
       try {
         const delta = await changedFilesBetween(
           octokit,
           req.ref,
-          priorSha,
+          last.sha,
           pull.headSha,
         );
         files = scopedFiles.filter((f) => delta.has(f.path));
         refreshPaths = new Set(files.map((f) => f.path));
+        incremental = "delta";
         logger.info("Incremental review", {
-          priorSha: priorSha.slice(0, 9),
+          priorSha: last.sha.slice(0, 9),
           headSha: pull.headSha.slice(0, 9),
           deltaInScope: files.length,
         });
@@ -222,20 +251,26 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
           return emptyResult("No in-scope changes since the last review.");
         }
       } catch (err) {
-        logger.warn("Incremental compare failed; doing a full review", {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        logger.warn(
+          "Incremental compare failed; full review, keeping prior comments",
+          {
+            error: err instanceof Error ? err.message : String(err),
+          },
+        );
         files = scopedFiles;
+        refreshPaths = new Set();
+        incremental = "unknown";
       }
     }
   }
+  const focus = new Set(files.map((f) => f.path));
 
   // Agentic (explore the checkout with tools) is the default; a reviewer opts
   // out with agentic: false to run one-shot from the diff alone.
   const agentic = req.agentic ?? true;
   const profile = req.profile ?? "chill";
 
-  // Per-glob instructions that apply to at least one file in scope.
+  // Per-glob instructions that apply to at least one file being reassessed.
   const pathInstructions = (req.pathInstructions ?? [])
     .filter((pi) => {
       const g = new Bun.Glob(pi.glob);
@@ -248,14 +283,14 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     logger.info("Loaded skills", { count: skills.length });
   }
 
-  const systemPrompt = buildSystemPrompt({
+  const promptOpts = {
     guidance: req.guidance,
     reasoning: req.reasoning,
-    agentic,
     profile,
     skills,
     conventions: conventions.text,
-  });
+  };
+  const systemPrompt = buildSystemPrompt({ ...promptOpts, agentic });
   // The harness runs where the repo is checked out. Scope to the subdir only if
   // it actually exists on disk; fall back to the workdir (or cwd) so a run
   // without a local checkout — the whole diff is in the prompt — still spawns.
@@ -273,21 +308,27 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     );
   }
 
-  // Agentic reviews with a real checkout get a changed-file TREE plus a diff
-  // file to explore — so the (often huge) diff isn't inlined into every turn.
-  // Headless reviews (and agentic with no checkout) inline the full diff.
+  // Agentic reviews with a real checkout get a changed-file TREE of every
+  // in-scope PR file plus a diff file holding all their patches, and a focus
+  // list when only some are being reassessed. Headless reviews (and agentic
+  // with no checkout) inline only the files under review.
   const treeMode = agentic && existsSync(scoped);
-  const diffPath = treeMode ? writeDiffFile(files, logger) : undefined;
+  const diffPath = treeMode ? writeDiffFile(scopedFiles, logger) : undefined;
   const commonPrompt = {
     title: pull.title,
     description: pull.description,
-    files,
     pathInstructions,
     timezone: req.timezone,
   };
-  const headlessUserPrompt = buildUserPrompt(commonPrompt);
+  const headlessUserPrompt = buildUserPrompt({ ...commonPrompt, files });
   const agenticUserPrompt = diffPath
-    ? buildUserPrompt({ ...commonPrompt, diffPath })
+    ? buildUserPrompt({
+        ...commonPrompt,
+        files: scopedFiles,
+        diffPath,
+        cwdSubdir: subdir && harnessCwd === scoped ? subdir : undefined,
+        focusPaths: files.length < scopedFiles.length ? [...focus] : undefined,
+      })
     : headlessUserPrompt;
 
   // Stable prompt-cache key per repo+reviewer so whip reuses the cached system
@@ -297,7 +338,18 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   // Noise profile: hard-filter by severity (the prompt asks too, this enforces).
   const keep = new Set(severitiesForProfile(profile));
 
-  // Run one model and return its (profile-filtered, diff-anchored) findings.
+  const counts = {
+    fallback: false,
+    malformedFindings: 0,
+    malformedConcerns: 0,
+    outOfScope: 0,
+    profileDropped: 0,
+  };
+
+  // Run one model and return its (scope-, profile-filtered, diff-anchored)
+  // findings. A subprocess failure OR unparseable output from the agentic run
+  // falls back once to a one-shot diff-only review so something still posts;
+  // the fallback's own failure propagates.
   const produceOne = async (
     model: string | undefined,
   ): Promise<{
@@ -312,47 +364,45 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       filesInScope: files.length,
       cwd: harnessCwd,
     });
-    const run = (useAgentic: boolean): Promise<string> =>
-      req.harness.review({
-        systemPrompt: useAgentic
-          ? systemPrompt
-          : buildSystemPrompt({
-              guidance: req.guidance,
-              reasoning: req.reasoning,
-              agentic: false,
-              profile,
-              skills,
-              conventions: conventions.text,
-            }),
-        userPrompt: useAgentic ? agenticUserPrompt : headlessUserPrompt,
-        model,
-        agentic: useAgentic,
-        workdir: harnessCwd,
-        env: req.harnessEnv,
-        whipConfig: req.whipConfig,
-        maxTurns: req.maxTurns,
-        cacheKey,
-        logger,
-      });
-    let stdout: string;
+    const run = (useAgentic: boolean) =>
+      req.harness
+        .review({
+          systemPrompt: useAgentic
+            ? systemPrompt
+            : buildSystemPrompt({ ...promptOpts, agentic: false }),
+          userPrompt: useAgentic ? agenticUserPrompt : headlessUserPrompt,
+          model,
+          agentic: useAgentic,
+          workdir: harnessCwd,
+          env: req.harnessEnv,
+          whipConfig: req.whipConfig,
+          maxTurns: req.maxTurns,
+          reasoning: req.reasoning,
+          cacheKey,
+          logger,
+        })
+        .then(parseReviewOutput);
+    let parsed;
     try {
-      stdout = await run(agentic);
+      parsed = await run(agentic);
     } catch (err) {
-      // Agentic runs can run away (hit the tool-turn cap) or otherwise fail;
-      // fall back to a one-shot diff-only review so we still post something.
       if (!agentic) throw err;
       logger.warn("Agentic review failed; retrying one-shot from the diff", {
         error: err instanceof Error ? err.message : String(err),
       });
-      stdout = await run(false);
+      counts.fallback = true;
+      parsed = await run(false);
     }
-    const review = parseReviewOutput(stdout);
-    const validated = validateFindings(review.findings, files);
-    return {
-      inline: validated.inline.filter((f) => keep.has(f.severity)),
-      review,
-      dropped: [...validated.dropped],
-    };
+    counts.malformedFindings += parsed.malformedFindings;
+    counts.malformedConcerns += parsed.malformedConcerns;
+    // Incremental runs reassess only the focus files; a finding anchored on a
+    // context file would duplicate a prior comment we deliberately kept.
+    const inScope = parsed.review.findings.filter((f) => focus.has(f.path));
+    counts.outOfScope += parsed.review.findings.length - inScope.length;
+    const validated = validateFindings(inScope, files);
+    const inline = validated.inline.filter((f) => keep.has(f.severity));
+    counts.profileDropped += validated.inline.length - inline.length;
+    return { inline, review: parsed.review, dropped: [...validated.dropped] };
   };
 
   const ensemble =
@@ -364,6 +414,8 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   let dropped: Finding[];
   let inline: Finding[];
   let uncertain: Finding[] = [];
+  let verify: ReviewDiagnostics["verify"] = "skipped";
+  let verifyDropped = 0;
 
   if (ensemble) {
     logger.info("Ensemble review", { models: ensemble });
@@ -390,7 +442,10 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     inline = one.inline;
     // Verification pass: a cheap second opinion that drops false positives.
     if (req.verify !== false && inline.length > 0) {
-      inline = await verifyInline(req, files, inline, harnessCwd);
+      const v = await verifyInline(req, files, inline, harnessCwd);
+      verify = v.status;
+      verifyDropped = inline.length - v.kept.length;
+      inline = v.kept;
     }
   }
 
@@ -399,6 +454,20 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       dropped: dropped.length,
     });
   }
+
+  const diagnostics: ReviewDiagnostics = {
+    fallback: counts.fallback,
+    verify,
+    incremental,
+    malformedDropped: {
+      findings: counts.malformedFindings,
+      concerns: counts.malformedConcerns,
+    },
+    outOfScopeDropped: counts.outOfScope,
+    profileDropped: counts.profileDropped,
+    verifyDropped,
+    offDiff: dropped.length,
+  };
 
   // Ensemble minority findings go in a collapsed lower-confidence section.
   const uncertainNote =
@@ -423,6 +492,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     summary: review.summary,
     inline,
     dropped,
+    diagnostics,
   };
 
   if (req.dryRun) {
@@ -432,6 +502,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       inline: inline.length,
       uncertain: uncertain.length,
       summary: review.summary,
+      diagnostics,
     });
     return result;
   }
@@ -441,25 +512,31 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     headSha: pull.headSha,
     refreshPaths,
     fileCount: files.length,
+    priorComments: req.priorComments,
+    diagnostics,
   });
   logger.info("Posted review", {
     reviewer: req.reviewerName ?? "default",
     inline: inline.length,
     dropped: dropped.length,
     verdict,
+    diagnostics,
   });
 
   return result;
 }
 
-/** Ask the harness to verify each finding against the diff; drop the ones it
- * judges not real. One-shot (never agentic). Fail-open: on any error keep all. */
+/**
+ * Ask the harness to judge each finding real or not; drop the ones it rejects.
+ * One-shot (never agentic). Fail-open: an error or an incomplete/invalid
+ * verdict set keeps every finding and reports why.
+ */
 async function verifyInline(
   req: ReviewRequest,
   files: readonly { path: string; patch: string | undefined }[],
   findings: readonly Finding[],
   harnessCwd: string,
-): Promise<Finding[]> {
+): Promise<{ kept: Finding[]; status: ReviewDiagnostics["verify"] }> {
   try {
     const stdout = await req.harness.review({
       systemPrompt: buildVerifySystemPrompt(),
@@ -470,22 +547,41 @@ async function verifyInline(
       env: req.harnessEnv,
       whipConfig: req.whipConfig,
       maxTurns: req.maxTurns,
+      reasoning: req.reasoning,
       cacheKey: `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`,
       logger: req.logger,
     });
-    const verdicts = parseVerification(stdout);
-    const kept = findings.filter((_, i) => verdicts.get(i) !== false);
+    const result = parseVerification(stdout, findings.length);
+    if (!result.valid) {
+      req.logger.warn("Verification output invalid; keeping all findings", {
+        reasons: result.reasons,
+      });
+      return { kept: [...findings], status: "invalid" };
+    }
+    const kept: Finding[] = [];
+    findings.forEach((f, i) => {
+      const v = result.verdicts.get(i);
+      if (v?.real === false) {
+        req.logger.info("Verification rejected a finding", {
+          path: f.path,
+          line: f.line,
+          reason: v.reason,
+        });
+      } else {
+        kept.push(f);
+      }
+    });
     req.logger.info("Verification pass", {
       before: findings.length,
       after: kept.length,
       dropped: findings.length - kept.length,
     });
-    return kept;
+    return { kept, status: "passed" };
   } catch (err) {
     req.logger.warn("Verification pass failed; keeping all findings", {
       error: err instanceof Error ? err.message : String(err),
     });
-    return [...findings];
+    return { kept: [...findings], status: "failed" };
   }
 }
 

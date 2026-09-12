@@ -98,6 +98,7 @@ async function runFix(
     env,
     whipConfig: config.whipConfig,
     maxTurns: config.maxTurns,
+    reasoning: config.reasoning,
     cacheKey: `loupe/${config.owner}/${config.repo}/fix`,
     logger,
   });
@@ -180,7 +181,10 @@ export async function handleComment(
     logger.info("Chat command: review");
     await postIssueComment(octokit, ref, "🔍 On it — re-reviewing this PR.");
     try {
-      await runReviews(config, logger, true);
+      // Reviewer failures are already reported per reviewer by runReviews;
+      // only a setup error reaches the catch below.
+      const ok = await runReviews(config, logger, true);
+      if (!ok) process.exitCode = 1;
     } catch (err) {
       await postFailure(octokit, ref, "review", err, logger);
     }
@@ -223,6 +227,7 @@ export async function handleComment(
       env,
       whipConfig: config.whipConfig,
       maxTurns: config.maxTurns,
+      reasoning: config.reasoning,
       cacheKey: `loupe/${config.owner}/${config.repo}/chat`,
       logger,
     });

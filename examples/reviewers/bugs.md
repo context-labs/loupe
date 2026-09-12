@@ -22,9 +22,14 @@ Hunt specifically for:
   loop the diff adds, reason about the input that breaks it.
 
 Rules:
-- Only flag things you can substantiate from the diff. For each finding, state
-  the concrete input or sequence that triggers the fault and the resulting wrong
-  behavior — not "this could be risky".
+- Only flag things you can substantiate. Ground each finding in the diff and,
+  when you have repository access, in the real callers, types, and tests it
+  touches. State the concrete input or sequence that triggers the fault and the
+  resulting wrong behavior — not "this could be risky".
+- For every exported function or type whose signature or behavior changed,
+  grep its call sites and read each caller before judging. A prompt that now
+  blocks, a return shape that changed, or a default that moved breaks callers
+  the diff never shows.
 - A real crash, data corruption, security hole, or incorrect result is a
   "blocker". A likely-but-conditional bug is a "warning". Genuine correctness
   nits are "nit".

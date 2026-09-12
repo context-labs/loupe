@@ -34,13 +34,14 @@ whose globs match a changed file and posts each as its own labeled review
 | `include` | no | Globs; reviewer runs only when a changed file matches. **Omit = the whole PR.** |
 | `exclude` | no | Globs removed from scope (lockfiles, generated output, …). |
 | `model` | no | Overrides the run's model for this reviewer. |
-| `reasoning` | no | `low` \| `medium` \| `high`. |
+| `reasoning` | no | `low` \| `medium` \| `high`. Passed to the harness natively (whip `defaultEffort`, `claude --effort`, codex `model_reasoning_effort`) and noted in the prompt. Unset = the harness's own default. |
 | `agentic` | no | `false` to run one-shot; omitted = agentic (the default). |
 | `profile` | no | Noise profile: `quiet` (blockers) \| `chill` (default) \| `assertive` (all). |
 | `verify` | no | `false` to skip the verification pass (default on). |
 | `pathInstructions` | no | `[{ glob, instruction }]` extra review instructions for matching files. |
 | `ensemble` | no | `["kimi-k3","glm-5.2-fast"]` — run several models, keep findings a majority agree on. |
 | `skills` | no | Paths to skill docs (a `SKILL.md` or a skill dir) folded into the reviewer, e.g. `[".agents/skills/i-have-adhd"]` to enforce a terse output style. |
+| `priorComments` | no | What happens to this reviewer's earlier inline comments on a re-review: `resolve` (default: resolve the thread, history kept) \| `delete` \| `keep` (leave them, new comments accumulate). Also a top-level default and the `prior-comments` Action input / `--prior-comments` flag. |
 
 Globs are matched with `Bun.Glob` against repo-relative paths. `include` also
 composes with `--dir` (subdir scope).
@@ -121,9 +122,22 @@ Two scopes:
   filter.
 - **Path instructions** — per-glob natural-language guidance injected only when
   a matching file changed (e.g. "in `**/*.sql`, flag full-table locks").
-- **Incremental review** — on a re-review, loupe reviews only the files changed
-  since its last review of the PR and replaces only those comments; comments on
-  untouched files are kept. `--full` / `full: true` forces a whole-PR review.
+- **Incremental review** — on a re-review, loupe reassesses only the in-scope
+  files changed since its last review of the PR. The whole in-scope PR diff is
+  still written to disk as context, and the prompt names the files to reassess.
+  Findings anchored on other files are dropped (counted in the run details).
+  Prior comments are cleaned up only on the reassessed files, per
+  `priorComments`. `--full` / `full: true` forces a whole-PR review. If the
+  history lookup or compare fails, loupe does a full review and touches no
+  prior comment.
+- **Run details** — every summary carries a collapsed `Run details` block:
+  whether the headless fallback ran, the verification status, the scope, and
+  how many findings were dropped as malformed, out of scope, below the noise
+  profile, or rejected by verification. The stat line shows `⚠️ degraded run`
+  when the review lost something.
+- **Reviewer failures are visible** — a reviewer that throws posts a
+  `⚠️ loupe · <name> could not complete this review` comment (no marker, no
+  SHA) and the job exits 1; the other reviewers still run.
 
 ## What a review looks like
 

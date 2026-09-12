@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { renderFileTree, type DiffFile } from "../src/diff";
-import { buildUserPrompt } from "../src/prompt";
+import {
+  buildSystemPrompt,
+  buildUserPrompt,
+  buildVerifySystemPrompt,
+} from "../src/prompt";
 
 const files: DiffFile[] = [
   { path: "src/a.ts", patch: "@@ -1,1 +1,2 @@\n line\n+added line\n-removed" },
@@ -34,5 +38,47 @@ describe("buildUserPrompt", () => {
     expect(p).toContain("- src/a.ts (+1 −1)");
     expect(p).toContain("/tmp/x/pr.diff");
     expect(p).not.toContain("+added line"); // the diff body is NOT inlined
+  });
+});
+
+describe("buildUserPrompt scope notes", () => {
+  const base = {
+    title: "t",
+    description: "",
+    files,
+    diffPath: "/tmp/x/pr.diff",
+  };
+
+  it("explains the cwd/path mapping only when running inside a subdir", () => {
+    expect(buildUserPrompt({ ...base, cwdSubdir: "inference" })).toContain(
+      "Your working directory is `inference/`",
+    );
+    expect(buildUserPrompt(base)).not.toContain("Your working directory");
+  });
+
+  it("lists focus files before the tree on an incremental run", () => {
+    const p = buildUserPrompt({ ...base, focusPaths: ["src/a.ts"] });
+    expect(p.indexOf("Files to reassess")).toBeLessThan(
+      p.indexOf("Changed files"),
+    );
+    expect(p).toContain("- src/a.ts\n");
+    expect(p).toContain("The other listed files are context");
+  });
+});
+
+describe("buildSystemPrompt reasoning", () => {
+  it("omits the reasoning note when no effort is configured", () => {
+    expect(buildSystemPrompt({})).not.toContain("Reasoning effort:");
+    expect(buildSystemPrompt({ reasoning: "high" })).toContain(
+      "Reasoning effort: high",
+    );
+  });
+});
+
+describe("buildVerifySystemPrompt", () => {
+  it("fails open on evidence outside the diff instead of rejecting it", () => {
+    const p = buildVerifySystemPrompt();
+    expect(p).toContain("outside-diff");
+    expect(p).not.toContain("based on code not shown");
   });
 });

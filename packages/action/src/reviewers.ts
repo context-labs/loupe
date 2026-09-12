@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import type { Profile, ReasoningEffort } from "@loupe/core";
+import type { PriorComments, Profile, ReasoningEffort } from "@loupe/core";
 import { z } from "zod";
 
 /**
@@ -36,8 +36,10 @@ const reviewerSchema = z
     ensemble: z.array(z.string()).optional(),
     /** Skill docs (paths to SKILL.md or a skill dir) to fold into the reviewer. */
     skills: z.array(z.string()).optional(),
-    /** Cap on the agentic tool loop for this reviewer (default 40). */
+    /** Cap on the agentic tool loop for this reviewer (default 10). */
     maxTurns: z.number().int().positive().optional(),
+    /** What to do with this reviewer's prior inline comments on a re-review. */
+    priorComments: z.enum(["resolve", "delete", "keep"]).optional(),
   })
   .refine((r) => !(r.prompt && r.promptFile), {
     message: "reviewer has both prompt and promptFile; use one",
@@ -71,6 +73,7 @@ const configSchema = z.object({
   timezone: z.string().optional(),
   dir: z.string().optional(),
   maxTurns: z.number().int().positive().optional(),
+  priorComments: z.enum(["resolve", "delete", "keep"]).optional(),
   whip: whipConfigSchema.optional(),
 });
 
@@ -84,6 +87,7 @@ export type LoupeSettings = {
   readonly timezone?: string;
   readonly dir?: string;
   readonly maxTurns?: number;
+  readonly priorComments?: PriorComments;
   readonly whip?: z.infer<typeof whipConfigSchema>;
 };
 
@@ -99,6 +103,7 @@ export function loadSettings(configPath: string): LoupeSettings {
     timezone: c.timezone,
     dir: c.dir,
     maxTurns: c.maxTurns,
+    priorComments: c.priorComments,
     whip: c.whip,
   };
 }
@@ -117,6 +122,7 @@ export type Reviewer = {
   readonly ensemble?: readonly string[];
   readonly skills?: readonly string[];
   readonly maxTurns?: number;
+  readonly priorComments?: PriorComments;
 };
 
 /**
@@ -148,5 +154,6 @@ export function loadReviewers(configPath: string): Reviewer[] {
     // Top-level skills apply to every reviewer, plus any reviewer-specific ones.
     skills: [...new Set([...topSkills, ...(r.skills ?? [])])],
     maxTurns: r.maxTurns,
+    priorComments: r.priorComments,
   }));
 }
