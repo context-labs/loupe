@@ -41,6 +41,8 @@ export type CallSite = {
   readonly path: string;
   readonly line: number;
   readonly text: string;
+  /** Up to four non-blank source lines before `line`, so a wrapper call such as `withProgress(` is visible without opening the file. */
+  readonly context?: readonly string[];
 };
 
 const SOURCE_GLOBS = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"];
@@ -121,34 +123,67 @@ export function findCallSites(
   return out;
 }
 
-const EXPORT_DECL_G = new RegExp(`^\\s*${VALUE_DECL.source}`, "gm");
+const FN_DECL =
+  /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s+([A-Za-z_$][\w$]*)|^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\(|function\b|[A-Za-z_$][\w$]*\s*=>)/;
 
-/** Exported value names declared in one source file (best-effort, regex). */
-function exportsOf(cwd: string, path: string): string[] {
-  try {
-    const src = readFileSync(join(cwd, path), "utf8");
-    return [...src.matchAll(EXPORT_DECL_G)]
-      .map((m) => m[1] ?? "")
-      .filter(Boolean);
-  } catch {
-    return [];
+/** Source lines of `path` under `cwd`, or [] when unreadable. Cached per call tree. */
+function linesOf(
+  cache: Map<string, string[]>,
+  cwd: string,
+  path: string,
+): string[] {
+  let lines = cache.get(path);
+  if (!lines) {
+    try {
+      lines = readFileSync(join(cwd, path), "utf8").split("\n");
+    } catch {
+      lines = [];
+    }
+    cache.set(path, lines);
   }
+  return lines;
+}
+
+/** Name of the nearest function declaration above `line` (1-based), exported or not. */
+function enclosingFunction(
+  lines: readonly string[],
+  line: number,
+): string | undefined {
+  for (let i = Math.min(line, lines.length) - 1; i >= 0; i--) {
+    const m = FN_DECL.exec(lines[i] ?? "");
+    if (m) return m[1] ?? m[2];
+  }
+  return undefined;
+}
+
+function withContext(lines: readonly string[], site: CallSite): CallSite {
+  const ctx: string[] = [];
+  for (let i = site.line - 2; i >= 0 && ctx.length < 4; i--) {
+    const t = (lines[i] ?? "").trim();
+    if (t) ctx.unshift(t.slice(0, 120));
+  }
+  return ctx.length ? { ...site, context: ctx } : site;
 }
 
 export type CallSiteGroup = {
   readonly name: string;
-  /** For a second-hop export: the caller file that defines it and the changed export it uses. */
+  /** For a later hop: the file that defines this function and the changed-or-derived function it calls. */
   readonly via?: { readonly file: string; readonly uses: string };
   readonly sites: readonly CallSite[];
 };
 
+/** How many caller hops to follow from a changed export. */
+const MAX_HOPS = 3;
+
 /**
- * Two hops of callers, each scoped to the package of the file being searched
- * from. Hop 1: callers of the changed exports. Hop 2: for every file found in
- * hop 1, its own exports and THEIR callers — a changed function behind a thin
- * wrapper (a `login()` that calls the changed selector) breaks the wrapper's
- * callers just the same, and those are where an agent stops looking when it
- * runs out of turns.
+ * Callers of the changed exports, followed up to MAX_HOPS through the
+ * functions that enclose each call site (exported or not), each hop scoped to
+ * the package of the file being searched. A changed function behind a thin
+ * wrapper (a `login()` that calls the changed selector, itself called from an
+ * `ensureSession()` that a spinner wraps) breaks the outermost caller just the
+ * same, and that is exactly where an agent stops looking when it runs out of
+ * turns. Every site carries a few lines of preceding context so the wrapper is
+ * visible in the prompt.
  */
 export function transitiveCallSites(
   cwd: string,
@@ -156,38 +191,51 @@ export function transitiveCallSites(
   excludePaths: ReadonlySet<string>,
 ): CallSiteGroup[] {
   const groups: CallSiteGroup[] = [];
+  const cache = new Map<string, string[]>();
   const seen = new Set(changed.map((c) => c.name));
-  const callerFiles = new Map<string, string>(); // file -> changed export it uses
+  // Functions to look up next: name -> where it is defined and what it calls.
+  let frontier = changed.map((c) => ({ name: c.name, file: c.file, uses: "" }));
 
-  const byRoot = new Map<string, string[]>();
-  for (const c of changed) {
-    const root = packageRoot(cwd, c.file);
-    byRoot.set(root, [...(byRoot.get(root) ?? []), c.name]);
-  }
-  for (const [root, names] of byRoot) {
-    const hop1 = findCallSites(cwd, names, excludePaths, root);
-    for (const [name, sites] of hop1) {
-      if (sites.length === 0) continue;
-      groups.push({ name, sites });
-      for (const s of sites) {
-        if (!callerFiles.has(s.path)) callerFiles.set(s.path, name);
+  for (let hop = 1; hop <= MAX_HOPS && frontier.length > 0; hop++) {
+    const next: typeof frontier = [];
+    const byRoot = new Map<string, typeof frontier>();
+    for (const f of frontier) {
+      const root = packageRoot(cwd, f.file);
+      byRoot.set(root, [...(byRoot.get(root) ?? []), f]);
+    }
+    for (const [root, fns] of byRoot) {
+      // Diff files are excluded (the agent reads those hunks anyway), but a
+      // later hop's own file is not: a private helper's callers usually sit
+      // in the same file. Its declaration and import lines are dropped below.
+      const found = findCallSites(
+        cwd,
+        fns.map((f) => f.name),
+        excludePaths,
+        root,
+        hop === 1 ? 12 : 6,
+      );
+      for (const fn of fns) {
+        const sites = (found.get(fn.name) ?? [])
+          .filter((s) => !FN_DECL.test(s.text) && !/^import\b/.test(s.text))
+          .map((s) => withContext(linesOf(cache, cwd, s.path), s));
+        if (sites.length === 0) continue;
+        groups.push({
+          name: fn.name,
+          via: fn.uses ? { file: fn.file, uses: fn.uses } : undefined,
+          sites,
+        });
+        for (const s of sites) {
+          const enclosing = enclosingFunction(
+            linesOf(cache, cwd, s.path),
+            s.line,
+          );
+          if (!enclosing || seen.has(enclosing)) continue;
+          seen.add(enclosing);
+          next.push({ name: enclosing, file: s.path, uses: fn.name });
+        }
       }
     }
-  }
-  for (const [file, uses] of callerFiles) {
-    const exps = exportsOf(cwd, file).filter((n) => !seen.has(n));
-    if (exps.length === 0) continue;
-    for (const n of exps) seen.add(n);
-    const hop2 = findCallSites(
-      cwd,
-      exps,
-      new Set([...excludePaths, file]),
-      packageRoot(cwd, file),
-      8,
-    );
-    for (const [name, sites] of hop2) {
-      if (sites.length > 0) groups.push({ name, via: { file, uses }, sites });
-    }
+    frontier = next;
   }
   return groups;
 }
@@ -200,10 +248,13 @@ export function renderCallSites(
   return groups
     .map((g) => {
       const head = g.via
-        ? `\`${g.name}\` (exported by ${pathPrefix}${g.via.file}, which calls changed \`${g.via.uses}\`; its callers inherit the change):`
-        : `\`${g.name}\` (changed in this diff):`;
+        ? `\`${g.name}\` (${pathPrefix}${g.via.file}) calls \`${g.via.uses}\`, so its callers inherit the change:`
+        : `\`${g.name}\` (changed in this diff) is called from:`;
       return `${head}\n${g.sites
-        .map((s) => `- ${pathPrefix}${s.path}:${s.line}  ${s.text}`)
+        .map((s) => {
+          const ctx = (s.context ?? []).map((c) => `      | ${c}`).join("\n");
+          return `${ctx ? `${ctx}\n` : ""}- ${pathPrefix}${s.path}:${s.line}  ${s.text}`;
+        })
         .join("\n")}`;
     })
     .join("\n\n");

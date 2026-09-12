@@ -103,25 +103,54 @@ describe("findCallSites", () => {
 });
 
 describe("transitiveCallSites", () => {
-  it("follows one more hop through a thin wrapper's exports, within the package", () => {
+  it("follows callers through enclosing functions, exported or not, with preceding context", () => {
     const cwd = repo();
+    // Add a private helper in harness.ts that a spinner wraps: the 3-hop chain
+    // selectProject <- login <- ensureSession <- withProgress(() => ensureSession()).
+    writeFileSync(
+      join(cwd, "apps/fast/commands/harness.ts"),
+      [
+        'import { login } from "./auth";',
+        "async function ensureSession() {",
+        "  await login();",
+        "}",
+        "const session = await withProgress(",
+        '  "Checking your session",',
+        "  () => ensureSession(),",
+        ");",
+      ].join("\n"),
+    );
     const groups = transitiveCallSites(
       cwd,
       [{ name: "selectProject", file: "apps/fast/lib/auth.ts" }],
       new Set(["apps/fast/lib/auth.ts"]),
     );
-    expect(groups.map((g) => g.name)).toEqual(["selectProject", "login"]);
-    expect(groups[1]!.via).toEqual({
-      file: "apps/fast/commands/auth.ts",
-      uses: "selectProject",
+    expect(groups.map((g) => g.name)).toEqual([
+      "selectProject",
+      "login",
+      "ensureSession",
+    ]);
+    expect(groups[2]!.via).toEqual({
+      file: "apps/fast/commands/harness.ts",
+      uses: "login",
     });
+    const spinner = groups[2]!.sites[0]!;
+    expect(spinner.line).toBe(7);
+    expect(spinner.context).toEqual([
+      "await login();",
+      "}",
+      "const session = await withProgress(",
+      '"Checking your session",',
+    ]);
     const rendered = renderCallSites(groups, "svc/");
     expect(rendered).toContain(
-      "`login` (exported by svc/apps/fast/commands/auth.ts, which calls changed `selectProject`",
+      "`ensureSession` (svc/apps/fast/commands/harness.ts) calls `login`",
     );
+    expect(rendered).toContain("      | const session = await withProgress(");
     expect(rendered).toContain(
-      "- svc/apps/fast/commands/harness.ts:2  await withProgress",
+      "- svc/apps/fast/commands/harness.ts:7  () => ensureSession(),",
     );
     expect(rendered).not.toContain("apps/other");
+    expect(rendered).not.toContain("import {");
   });
 });

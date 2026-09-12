@@ -256,6 +256,9 @@ describe("runReview end to end", () => {
     expect(agenticCtx.userPrompt).toContain(
       "- svc/cmd/run.ts:1  await withProgress(() => selectThing());",
     );
+    expect(agenticCtx.userPrompt).toContain(
+      "`selectThing` (changed in this diff) is called from:",
+    );
     expect(agenticCtx.systemPrompt).toContain("Procedure — do these before");
 
     // The verify pass ran headless over the one in-scope finding.
