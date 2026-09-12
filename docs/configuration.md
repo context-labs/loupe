@@ -41,6 +41,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `pathInstructions` | no | `[{ glob, instruction }]` extra review instructions for matching files. |
 | `ensemble` | no | `["kimi-k3","glm-5.2-fast"]` — run several models, keep findings a majority agree on. |
 | `skills` | no | Paths to skill docs (a `SKILL.md` or a skill dir) folded into the reviewer, e.g. `[".agents/skills/i-have-adhd"]` to enforce a terse output style. |
+| `procedure` | no | `false` drops the always-on review procedure (caller check, wrapper rule) from this reviewer's prompt. Also a top-level default. |
 | `priorComments` | no | What happens to this reviewer's earlier inline comments on a re-review: `resolve` (default: resolve the thread, history kept) \| `delete` \| `keep` (leave them, new comments accumulate). Also a top-level default and the `prior-comments` Action input / `--prior-comments` flag. |
 
 Globs are matched with `Bun.Glob` against repo-relative paths. `include` also
