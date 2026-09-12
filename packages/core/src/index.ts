@@ -10,13 +10,14 @@ import { join } from "node:path";
 
 import type { Harness, WhipConfig } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
+import type { Octokit } from "@octokit/rest";
+import picomatch from "picomatch";
 
 import {
   changedFilesBetween,
   fetchConventions,
   fetchPullContext,
   getLastReviewed,
-  makeOctokit,
   postReview,
   type PriorComments,
   type PullRef,
@@ -65,7 +66,8 @@ export * from "./github";
 export * from "./ensemble";
 
 export type ReviewRequest = {
-  readonly token: string;
+  /** Authenticated GitHub client; see makeOctokit. */
+  readonly octokit: Octokit;
   readonly ref: PullRef;
   readonly harness: Harness;
   readonly workdir: string;
@@ -165,7 +167,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     subdir: subdir ?? null,
   });
 
-  const octokit = makeOctokit(req.token, logger);
+  const { octokit } = req;
   logger.debug("Fetching PR context and conventions", { conventionPaths });
   const [pull, conventions] = await Promise.all([
     fetchPullContext(octokit, req.ref),
@@ -183,12 +185,16 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     });
   }
 
-  const include = req.include?.map((g) => new Bun.Glob(g));
-  const exclude = req.exclude?.map((g) => new Bun.Glob(g));
+  const include = req.include
+    ? picomatch([...req.include], { dot: true })
+    : undefined;
+  const exclude = req.exclude
+    ? picomatch([...req.exclude], { dot: true })
+    : undefined;
   const scopedFiles = pull.files.filter((f) => {
     if (subdir && !f.path.startsWith(prefix)) return false;
-    if (include && !include.some((g) => g.match(f.path))) return false;
-    if (exclude && exclude.some((g) => g.match(f.path))) return false;
+    if (include && !include(f.path)) return false;
+    if (exclude && exclude(f.path)) return false;
     return true;
   });
 
@@ -273,8 +279,8 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   // Per-glob instructions that apply to at least one file being reassessed.
   const pathInstructions = (req.pathInstructions ?? [])
     .filter((pi) => {
-      const g = new Bun.Glob(pi.glob);
-      return files.some((f) => g.match(f.path));
+      const match = picomatch(pi.glob, { dot: true });
+      return files.some((f) => match(f.path));
     })
     .map((pi) => `(${pi.glob}) ${pi.instruction}`);
 

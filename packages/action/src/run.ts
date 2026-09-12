@@ -1,5 +1,6 @@
 import {
   isDegraded,
+  makeOctokit,
   runReview,
   type PriorComments,
   type Profile,
@@ -72,7 +73,7 @@ export async function reviewPullRequest(
   });
 
   return runReview({
-    token: input.token,
+    octokit: makeOctokit(input.token, logger),
     ref: {
       owner: input.owner,
       repo: input.repo,
