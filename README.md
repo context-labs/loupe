@@ -68,7 +68,7 @@ ANTHROPIC_API_KEY=sk-... \
 Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`.
 
 Key flags (defaults in parens): `--harness` (whip), `--model` (kimi-k3),
-`--reasoning low|medium|high` (low), `--profile quiet|chill|assertive` (chill),
+`--reasoning low|medium|high` (harness default; passed natively), `--profile quiet|chill|assertive` (chill),
 `--config <path>` (focused reviewers), `--reviewer <name>` (run just one),
 `--prompt-file <path>` (custom guidance), `--dir` (subdir scope), `--ensemble`
 (multi-model majority), `--timezone`, `--max-turns` (agentic loop cap),
@@ -159,9 +159,11 @@ migration-risk pair.
 
 The system prompt is layered. `--prompt-file` (CLI) / `prompt-file` input
 (Action) / a reviewer's `promptFile` replaces only the **guidance** layer
-(persona + priorities). loupe always appends the reasoning note, profile
-directive, tool-access directive, repo conventions, and the JSON output
-contract — so a custom prompt can't break parsing or trigger tool loops. Write
+(persona + priorities). loupe always appends the review procedure (check
+callers first; `procedure: false` removes it), the profile directive,
+tool-access directive, repo conventions, and the JSON output contract, plus a
+reasoning note when `reasoning` is set — so a custom prompt can't break parsing
+or trigger tool loops. Write
 only persona/priorities; never the JSON schema. See `examples/loupe-prompt.md`.
 
 ## GitHub integration

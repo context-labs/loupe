@@ -213,7 +213,10 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     summary,
     inline: [],
     dropped: [],
-    diagnostics: CLEAN_DIAGNOSTICS,
+    diagnostics: {
+      ...CLEAN_DIAGNOSTICS,
+      mode: (req.agentic ?? true) ? "agentic" : "headless",
+    },
   });
 
   if (scopedFiles.length === 0) {

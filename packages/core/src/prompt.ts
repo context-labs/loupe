@@ -268,7 +268,7 @@ export function buildUserPrompt(input: UserPromptInput): string {
   const cwdNote = input.cwdSubdir
     ? `Your working directory is \`${input.cwdSubdir}/\` inside the repository. Listed source paths are repository-relative: when opening those files from this directory, remove the leading \`${input.cwdSubdir}/\`. Report finding paths exactly as listed. The absolute diff-file path is unchanged.`
     : "";
-  const focusNote = input.focusPaths
+  const focusNote = input.focusPaths?.length
     ? [
         "Files to reassess (changed since this reviewer's last review):",
         input.focusPaths.map((p) => `- ${p}`).join("\n"),
