@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import type { Profile, ReasoningEffort } from "@loupe/core";
+import type { PriorComments, Profile, ReasoningEffort } from "@loupe/core";
 import {
   dotenvProvider,
   envProvider,
@@ -58,6 +58,7 @@ const envSchema = z.object({
   LOUPE_SKILLS: z.string().default(""),
   LOUPE_TIMEZONE: optionalInput,
   LOUPE_MAX_TURNS: optionalInput,
+  LOUPE_PRIOR_COMMENTS: optionalInput,
 });
 
 function asMaxTurns(v: string | undefined): number | undefined {
@@ -71,6 +72,17 @@ function asMaxTurns(v: string | undefined): number | undefined {
 
 const REASONING = ["low", "medium", "high"] as const;
 const PROFILES = ["quiet", "chill", "assertive"] as const;
+const PRIOR_COMMENTS = ["resolve", "delete", "keep"] as const;
+
+function asPriorComments(v: string | undefined): PriorComments | undefined {
+  if (v === undefined) return undefined;
+  if ((PRIOR_COMMENTS as readonly string[]).includes(v)) {
+    return v as PriorComments;
+  }
+  throw new Error(
+    `Invalid prior-comments "${v}". Use: ${PRIOR_COMMENTS.join(", ")}`,
+  );
+}
 
 function asReasoning(v: string | undefined): ReasoningEffort | undefined {
   if (v === undefined) return undefined;
@@ -95,7 +107,8 @@ export type Config = {
   readonly providers: readonly CredentialProvider[];
   readonly subdir?: string;
   readonly model: string;
-  readonly reasoning: ReasoningEffort;
+  /** Unset = harness default effort and no reasoning note in the prompt. */
+  readonly reasoning?: ReasoningEffort;
   readonly guidance?: string;
   readonly configPath?: string;
   readonly reviewerFilter?: string;
@@ -107,6 +120,10 @@ export type Config = {
   readonly timezone: string;
   readonly whipConfig?: WhipConfig;
   readonly maxTurns?: number;
+  /** Explicit input/file value only; core defaults to "resolve". */
+  readonly priorComments?: PriorComments;
+  /** File value only; core defaults to true. */
+  readonly procedure?: boolean;
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -139,7 +156,7 @@ export function loadConfig(): Config {
     providers: buildProviders(env),
     subdir: env.LOUPE_DIR ?? file.dir,
     model: env.LOUPE_MODEL ?? file.model ?? "kimi-k3",
-    reasoning: asReasoning(env.LOUPE_REASONING) ?? file.reasoning ?? "low",
+    reasoning: asReasoning(env.LOUPE_REASONING) ?? file.reasoning,
     guidance: env.LOUPE_PROMPT_FILE
       ? readFileSync(inWorkspace(env.LOUPE_PROMPT_FILE), "utf8")
       : undefined,
@@ -156,6 +173,9 @@ export function loadConfig(): Config {
       .filter(Boolean),
     timezone: env.LOUPE_TIMEZONE ?? file.timezone ?? "UTC",
     maxTurns: asMaxTurns(env.LOUPE_MAX_TURNS) ?? file.maxTurns,
+    priorComments:
+      asPriorComments(env.LOUPE_PRIOR_COMMENTS) ?? file.priorComments,
+    procedure: file.procedure,
     whipConfig: file.whip,
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,

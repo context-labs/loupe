@@ -21,13 +21,24 @@ function parseLenient(text: string): unknown {
   }
 }
 
+/** A parsed review plus what the parser had to discard to produce it. */
+export type ParsedReview = {
+  readonly review: ReviewOutput;
+  /** Findings that failed the per-item schema and were dropped. */
+  readonly malformedFindings: number;
+  /** Concerns that failed the per-item schema and were dropped. */
+  readonly malformedConcerns: number;
+};
+
 /**
  * Pull the review JSON out of a harness's raw stdout. CLIs wrap output in prose
  * or code fences, so we grab the last balanced {...} block and validate it.
- * Throws if no valid review object is found — a malformed review is a hard
- * failure, not a silent empty review.
+ * Throws if no recognizable review object is found — a malformed review is a
+ * hard failure, not a silent empty review. "Recognizable" means the object
+ * carries a string `summary` and an array `findings`; an unrelated object like
+ * `{"status":"done"}` must not parse as an empty clean review.
  */
-export function parseReviewOutput(stdout: string): ReviewOutput {
+export function parseReviewOutput(stdout: string): ParsedReview {
   if (stdout.trim().length === 0) {
     throw new Error(
       "Harness produced no output. It may have failed to authenticate, hit a " +
@@ -45,6 +56,16 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
   }
   const candidate = extractLastJsonObject(stdout) ?? stdout.slice(start);
   const parsed: unknown = parseLenient(candidate);
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    typeof (parsed as { summary?: unknown }).summary !== "string" ||
+    !Array.isArray((parsed as { findings?: unknown }).findings)
+  ) {
+    throw new Error(
+      `Harness output is not a review (needs a string "summary" and an array "findings"):\n${candidate.slice(0, 1000)}`,
+    );
+  }
   const { summary, findings, concerns, highlights, diagram } =
     reviewOutputSchema.parse(parsed);
   // Validate each item independently; drop malformed ones rather than rejecting
@@ -57,30 +78,65 @@ export function parseReviewOutput(stdout: string): ReviewOutput {
       const r = schema.safeParse(i);
       return r.success && r.data !== undefined ? [r.data] : [];
     });
+  const keptFindings = pick(findings, findingSchema);
+  const keptConcerns = pick(concerns, concernSchema);
   return {
-    summary,
-    findings: pick(findings, findingSchema),
-    concerns: pick(concerns, concernSchema),
-    highlights: highlights.map((h) => h.trim()).filter(Boolean),
-    diagram: diagram?.trim() ? diagram.trim() : undefined,
+    review: {
+      summary,
+      findings: keptFindings,
+      concerns: keptConcerns,
+      highlights: highlights.map((h) => h.trim()).filter(Boolean),
+      diagram: diagram?.trim() ? diagram.trim() : undefined,
+    },
+    malformedFindings: findings.length - keptFindings.length,
+    malformedConcerns: concerns.length - keptConcerns.length,
   };
 }
 
-/** Parse the verification pass output into a map of finding index → real?. */
-export function parseVerification(stdout: string): Map<number, boolean> {
-  const map = new Map<number, boolean>();
+export type Verdict = { readonly real: boolean; readonly reason?: string };
+
+/**
+ * The verification pass result. `valid` is true only when the output carries
+ * exactly one verdict for every expected finding index; anything less (no JSON,
+ * schema failure, missing, duplicate, or out-of-range indices) is `invalid` and
+ * the caller keeps every finding.
+ */
+export type VerificationResult =
+  | { readonly valid: true; readonly verdicts: ReadonlyMap<number, Verdict> }
+  | { readonly valid: false; readonly reasons: readonly string[] };
+
+export function parseVerification(
+  stdout: string,
+  expectedCount: number,
+): VerificationResult {
   const candidate = extractLastJsonObject(stdout);
-  if (!candidate) return map;
+  if (!candidate) return { valid: false, reasons: ["no JSON object"] };
   let parsed: unknown;
   try {
     parsed = parseLenient(candidate);
-  } catch {
-    return map;
+  } catch (err) {
+    return {
+      valid: false,
+      reasons: [
+        `unparseable JSON: ${err instanceof Error ? err.message : String(err)}`,
+      ],
+    };
   }
   const result = verificationSchema.safeParse(parsed);
-  if (!result.success) return map;
-  for (const v of result.data.verdicts) map.set(v.index, v.real);
-  return map;
+  if (!result.success) return { valid: false, reasons: ["schema mismatch"] };
+  const verdicts = new Map<number, Verdict>();
+  const reasons: string[] = [];
+  for (const v of result.data.verdicts) {
+    if (v.index >= expectedCount) reasons.push(`index ${v.index} out of range`);
+    else if (verdicts.has(v.index)) reasons.push(`duplicate index ${v.index}`);
+    else verdicts.set(v.index, { real: v.real, reason: v.reason });
+  }
+  for (let i = 0; i < expectedCount; i++) {
+    if (!verdicts.has(i)) reasons.push(`missing verdict for #${i}`);
+  }
+  return reasons.length > 0
+    ? { valid: false, reasons }
+    : { valid: true, verdicts };
 }
 
 /** Scan for the last top-level {...} by brace-depth, ignoring string contents. */

@@ -45,13 +45,40 @@ describe("parseReviewOutput", () => {
   it("extracts the JSON object from noisy CLI output", () => {
     const stdout =
       'Here is my review:\n```json\n{"summary":"looks ok","findings":[]}\n```\nDone.';
-    const parsed = parseReviewOutput(stdout);
-    expect(parsed.summary).toBe("looks ok");
-    expect(parsed.findings).toEqual([]);
+    const { review } = parseReviewOutput(stdout);
+    expect(review.summary).toBe("looks ok");
+    expect(review.findings).toEqual([]);
   });
 
   it("throws on missing JSON", () => {
     expect(() => parseReviewOutput("no json here")).toThrow();
+  });
+
+  it("rejects an object that is not a review instead of treating it as clean", () => {
+    expect(() => parseReviewOutput("{}")).toThrow(/not a review/);
+    expect(() => parseReviewOutput('{"status":"done"}')).toThrow(
+      /not a review/,
+    );
+  });
+
+  it("counts malformed findings it had to drop", () => {
+    const { review, malformedFindings } = parseReviewOutput(
+      '{"summary":"s","findings":[{"path":"a","line":1,"severity":"nit","body":"ok"},{"path":"b"}]}',
+    );
+    expect(review.findings).toHaveLength(1);
+    expect(malformedFindings).toBe(1);
+  });
+
+  it("keeps multi-paragraph Markdown bodies with code fences intact", () => {
+    const body =
+      "First paragraph.\n\n```ts\nawait x();\n```\n\nSecond paragraph.";
+    const { review } = parseReviewOutput(
+      JSON.stringify({
+        summary: "s",
+        findings: [{ path: "a", line: 1, severity: "warning", body }],
+      }),
+    );
+    expect(review.findings[0]!.body).toBe(body);
   });
 
   it("throws a clear error on empty output", () => {
@@ -59,13 +86,14 @@ describe("parseReviewOutput", () => {
   });
 
   it("normalizes off-scale severities onto blocker/warning/nit", () => {
-    const out = parseReviewOutput(
+    const { review: out, malformedFindings } = parseReviewOutput(
       '{"summary":"s","findings":[' +
         '{"path":"a","line":1,"severity":"critical","body":"x"},' +
         '{"path":"b","line":2,"severity":"major","body":"y"},' +
         '{"path":"c","line":3,"severity":"MINOR","body":"z"},' +
         '{"path":"d","line":4,"severity":"whoknows","body":"w"}]}',
     );
+    expect(malformedFindings).toBe(0); // normalized aliases are not malformed
     expect(out.findings.map((f) => f.severity)).toEqual([
       "blocker",
       "warning",
@@ -76,8 +104,8 @@ describe("parseReviewOutput", () => {
 });
 
 describe("parseReviewOutput concerns/diagram", () => {
-  it("parses concerns and a diagram, dropping malformed concerns", () => {
-    const out = parseReviewOutput(
+  it("parses concerns and a diagram, dropping and counting malformed concerns", () => {
+    const { review: out, malformedConcerns } = parseReviewOutput(
       JSON.stringify({
         summary: "s",
         findings: [],
@@ -91,21 +119,46 @@ describe("parseReviewOutput concerns/diagram", () => {
     expect(out.concerns).toEqual([
       { title: "risk", detail: "watch out", severity: "warning" },
     ]);
+    expect(malformedConcerns).toBe(1);
     expect(out.diagram).toContain("sequenceDiagram");
   });
 });
 
 describe("parseVerification", () => {
-  it("maps finding index to real verdict", () => {
-    const m = parseVerification(
-      'ok: {"verdicts":[{"index":0,"real":true},{"index":1,"real":false}]}',
+  it("maps finding index to a verdict when every index is covered once", () => {
+    const r = parseVerification(
+      'ok: {"verdicts":[{"index":0,"real":true},{"index":1,"real":false,"reason":"dup"}]}',
+      2,
     );
-    expect(m.get(0)).toBe(true);
-    expect(m.get(1)).toBe(false);
-    expect(m.get(2)).toBeUndefined();
+    expect(r.valid).toBe(true);
+    if (!r.valid) return;
+    expect(r.verdicts.get(0)).toEqual({ real: true, reason: undefined });
+    expect(r.verdicts.get(1)).toEqual({ real: false, reason: "dup" });
   });
-  it("returns empty map on junk", () => {
-    expect(parseVerification("no json").size).toBe(0);
+  it("is invalid on junk, a bare object, or an empty verdict list", () => {
+    expect(parseVerification("no json", 1).valid).toBe(false);
+    expect(parseVerification("{}", 1).valid).toBe(false);
+    expect(parseVerification('{"verdicts":[]}', 1).valid).toBe(false);
+  });
+  it("is invalid on missing, duplicate, or out-of-range indices", () => {
+    const missing = parseVerification(
+      '{"verdicts":[{"index":0,"real":true}]}',
+      2,
+    );
+    expect(missing).toEqual({
+      valid: false,
+      reasons: ["missing verdict for #1"],
+    });
+    const dup = parseVerification(
+      '{"verdicts":[{"index":0,"real":true},{"index":0,"real":false}]}',
+      1,
+    );
+    expect(dup.valid).toBe(false);
+    const range = parseVerification(
+      '{"verdicts":[{"index":3,"real":true}]}',
+      1,
+    );
+    expect(range.valid).toBe(false);
   });
 });
 
@@ -148,13 +201,13 @@ describe("parseReviewOutput resilience (jsonrepair)", () => {
     // Missing closing braces/brackets (model hit a token limit).
     const truncated =
       '{"summary":"looks ok","findings":[{"path":"a.ts","line":1,"severity":"blocker","body":"boom"}';
-    const out = parseReviewOutput(truncated);
+    const { review: out } = parseReviewOutput(truncated);
     expect(out.summary).toBe("looks ok");
     expect(out.findings).toHaveLength(1);
     expect(out.findings[0]!.path).toBe("a.ts");
   });
   it("recovers JSON with a trailing comma", () => {
-    const out = parseReviewOutput(
+    const { review: out } = parseReviewOutput(
       '{"summary":"s","findings":[],"walkthrough":[],}',
     );
     expect(out.summary).toBe("s");

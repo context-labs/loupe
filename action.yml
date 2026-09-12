@@ -10,7 +10,7 @@ inputs:
     default: ${{ github.token }}
   # harness/model/reasoning/profile/timezone/dir default to empty so a value in
   # .loupe.json wins; set an input here only to override the file. Built-in
-  # fallbacks (whip / kimi-k3 / low / chill / UTC) apply when neither is set.
+  # fallbacks (whip / kimi-k3 / harness-default effort / chill / UTC) apply when neither is set.
   harness:
     description: "Which agent CLI to review with (whip, claude, codex). Overrides .loupe.json; default whip."
     required: false
@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ""
   reasoning:
-    description: "Reasoning effort: low, medium, or high. Overrides .loupe.json; default low."
+    description: "Reasoning effort: low, medium, or high, passed to the harness natively. Overrides .loupe.json; unset = the harness's own default."
     required: false
     default: ""
   prompt-file:
@@ -75,6 +75,10 @@ inputs:
     description: "Cap on the agentic tool loop. Overrides .loupe.json; default 10."
     required: false
     default: ""
+  prior-comments:
+    description: "What to do with loupe's prior inline comments on a re-review: resolve (default), delete, or keep. Overrides .loupe.json."
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -104,4 +108,5 @@ runs:
         LOUPE_SKILLS: ${{ inputs.skills }}
         LOUPE_TIMEZONE: ${{ inputs.timezone }}
         LOUPE_MAX_TURNS: ${{ inputs.max-turns }}
+        LOUPE_PRIOR_COMMENTS: ${{ inputs.prior-comments }}
       run: bun run packages/action/src/main.ts

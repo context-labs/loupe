@@ -1,7 +1,9 @@
+import type { ReasoningEffort } from "@loupe/harness";
+
 import { renderDiff, renderFileTree, type DiffFile } from "./diff";
 import type { Finding, Profile } from "./types";
 
-export type ReasoningEffort = "low" | "medium" | "high";
+export type { ReasoningEffort };
 
 /**
  * The default reviewer guidance — the persona and priorities half of the system
@@ -26,8 +28,12 @@ Priorities, in order:
 5. Clarity & maintainability — only when it materially hurts readability.
 
 Rules of engagement:
-- Review ONLY the diff you are given. Do not speculate about code you can't see;
-  if something can't be judged from the diff, say so briefly or omit it.
+- The diff is what you are reviewing. When you have repository access, use it:
+  read the callers, types, and tests the change touches and ground findings in
+  what you found. Without repository access, do not speculate about code you
+  can't see; if something can't be judged from the diff, say so briefly or omit it.
+- For every exported function or type whose signature or behavior changed,
+  find its call sites and check each caller still holds before judging.
 - Prefer a few high-signal findings over many low-value ones. Do not pad the
   review with nitpicks. If the PR is clean, say so and return no findings.
 - ANCHOR TO LINES. If an issue relates to specific line(s), it MUST be a
@@ -35,11 +41,12 @@ Rules of engagement:
   "concerns" ONLY for issues that genuinely span the whole PR and cannot point
   to any single line. Default to findings; concerns are the exception.
 
-Writing style — be RUTHLESSLY terse (assume the reader has 20 seconds):
+Writing style:
 - Lead with the problem and the fix. No preamble, no praise, no restating the
   diff, no "this PR…" throat-clearing.
-- Finding bodies: 1-2 short sentences. Say what's wrong and what to do. That's it.
-- summary: 1-2 sentences. concern details: 1-2 sentences.
+- Say what's wrong and what to do. Use as much space as the defect needs and no
+  more: a one-line nit stays one line; a subtle race gets the sequence that
+  triggers it and a short code block for the fix.
 - Short sentences, active voice, concrete nouns. Cut every word that isn't
   load-bearing.
 
@@ -50,15 +57,43 @@ Severity rubric:
   not catastrophic.
 - "nit": minor, optional, or stylistic. Use sparingly.`.trim();
 
+/**
+ * Always-on review procedure. Appended after the guidance whether or not a
+ * custom prompt replaced the default, because custom reviewer prompts describe
+ * WHAT to look for and routinely omit HOW to check it. Consumers turn it off
+ * with `procedure: false`.
+ */
+const REVIEW_PROCEDURE = `
+Procedure — do these before writing any finding:
+1. For every exported function, method, or type whose signature OR behavior
+   changed (sync→async, pure→prompting/blocking/interactive, new side effect,
+   changed default, changed return shape), read every call site listed under
+   "Call sites of changed exports" and any others you find. Check each caller
+   still holds. A behavior change propagates: if a caller wraps the changed
+   function in a spinner, lock, transaction, retry, or timeout, ask whether
+   that wrapper is still valid. A function that newly prompts, blocks on
+   input, or writes to the terminal while running inside a progress
+   spinner or any wrapper that owns the terminal is a defect, not a
+   cosmetic issue: the spinner redraws over the prompt and the user cannot
+   read or answer it. Report it at the line that introduced the prompt.
+2. Follow one more hop when the caller is itself a thin wrapper (e.g. a
+   \`login()\` that just calls the changed function): its callers inherit the
+   change too.
+3. Only then judge the diff's own logic.
+State in the summary which callers you checked.`.trim();
+
 const OUTPUT_CONTRACT = `
-Respond with ONE JSON object and NOTHING else — no prose, no code fences.
+Respond with ONE JSON object and NOTHING else — no prose before or after it,
+and do not wrap the object in a Markdown code fence. "summary", "detail", and
+"body" values are GitHub Markdown: paragraphs and fenced code blocks inside
+those strings are fine. Escape them as valid JSON strings.
 Schema:
 {
-  "summary": "<1-2 sentences: what this PR does + your verdict. Terse.>",
+  "summary": "<what this PR does + your verdict>",
   "concerns": [
     {
       "title": "<short title of a PR-level issue not tied to any single line>",
-      "detail": "<1-2 sentences: the problem and the fix>",
+      "detail": "<the problem and the fix>",
       "severity": "blocker" | "warning" | "nit"
     }
   ],
@@ -69,14 +104,14 @@ Schema:
       "path": "<repo-relative file path, exactly as shown in the diff>",
       "line": <line number in the NEW version of the file; must be a changed or context line shown in the diff>,
       "severity": "blocker" | "warning" | "nit",
-      "body": "<1-2 sentences: the problem on THIS line and the fix. Terse.>"
+      "body": "<the problem on THIS line and the fix>"
     }
   ]
 }
 PREFER "findings" — if an issue relates to specific line(s), emit it as a finding
 with the diff line number (it becomes an inline comment). Reserve "concerns" for
-truly PR-wide issues with no line to point at. Every section terse; empty arrays
-when nothing to say. "highlights" usually empty.`.trim();
+truly PR-wide issues with no line to point at. Empty arrays when nothing to say.
+"highlights" usually empty.`.trim();
 
 const PROFILE_DIRECTIVE: Record<Profile, string> = {
   quiet:
@@ -103,20 +138,11 @@ assess real-world impact — the actual schema/table definitions, related
 migrations, model and query code, and existing indexes/constraints the diff
 interacts with. Ground each finding in what you actually found, not a guess.
 
-Use SUBAGENTS heavily. Fan out independent investigations in parallel — one
-subagent per file, per suspected issue, or per question — instead of exploring
-serially yourself. Spawn many; they are cheap and fast.
-
-Convene a PANEL OF MODELS to pressure-test anything important. When you suspect a
-real bug (especially a blocker), do NOT trust a single opinion: spawn 2-3
-subagents on DIFFERENT models to independently confirm or refute it, and only
-report it if the panel agrees. Diversify the models across subagents — use a mix
-of glm-5.3-flash, glm-5.2-fast, and deepseek-v4-pro-0813 — so you get genuinely
-independent judgment, not the same model agreeing with itself.
-
-Be efficient with your OWN turns: delegate exploration to subagents, then
-synthesize. Once the panel has confirmed the findings, STOP and respond with
-ONLY the final JSON object — do not keep exploring.`.trim();
+Your tool budget is limited. Spend it on the change's callers and contracts
+first. Use subagents when several independent investigations would otherwise run
+serially; do not spawn them for a single grep. If you suspect a blocker and have
+budget left, get one independent confirmation before reporting it. When you have
+what you need, STOP and respond with ONLY the final JSON object.`.trim();
 
 const REASONING_NOTE: Record<ReasoningEffort, string> = {
   low: "Reasoning effort: low. Do a quick pass; flag only obvious, high-confidence issues.",
@@ -132,11 +158,14 @@ const REASONING_NOTE: Record<ReasoningEffort, string> = {
  */
 export function buildSystemPrompt(opts: {
   guidance?: string;
-  reasoning: ReasoningEffort;
+  /** Omitted: no reasoning note; the harness's native default applies. */
+  reasoning?: ReasoningEffort;
   agentic?: boolean;
   profile?: Profile;
   /** Loaded skill docs (SKILL.md bodies) to fold into the reviewer's behavior. */
   skills?: readonly string[];
+  /** Append the always-on review procedure (default true). */
+  procedure?: boolean;
   /** Repo convention docs (CLAUDE.md/AGENTS.md/…). Stable per repo → kept in the
    * system prompt so it stays a cacheable prefix across PRs. */
   conventions?: string;
@@ -154,9 +183,10 @@ export function buildSystemPrompt(opts: {
   // diff, path notes, current date) lives in the user message instead.
   return [
     opts.guidance?.trim() || DEFAULT_REVIEW_GUIDANCE,
+    opts.procedure === false ? "" : REVIEW_PROCEDURE,
     skillsBlock,
     conventionsBlock,
-    REASONING_NOTE[opts.reasoning],
+    opts.reasoning ? REASONING_NOTE[opts.reasoning] : "",
     PROFILE_DIRECTIVE[opts.profile ?? "chill"],
     opts.agentic ? AGENTIC_DIRECTIVE : HEADLESS_DIRECTIVE,
     OUTPUT_CONTRACT,
@@ -207,6 +237,22 @@ export type UserPromptInput = {
    * reviews, where the full diff must be inlined.
    */
   readonly diffPath?: string;
+  /**
+   * Set only when the harness actually runs inside this repo subdirectory.
+   * Tells the agent how listed repo-relative paths map onto its cwd.
+   */
+  readonly cwdSubdir?: string;
+  /**
+   * Incremental review: the files to reassess. `files` then holds every
+   * in-scope PR file as context. Omitted means all of `files` are the target.
+   */
+  readonly focusPaths?: readonly string[];
+  /**
+   * Pre-computed callers of the exports this diff changes, outside the diff
+   * itself (see callsites.ts). Rendered so the agent spends its turns judging
+   * callers instead of locating them.
+   */
+  readonly callSites?: string;
 };
 
 /** The per-PR user message: environment, metadata, per-path notes, and either
@@ -219,6 +265,19 @@ export function buildUserPrompt(input: UserPromptInput): string {
         .map((i) => `- ${i}`)
         .join("\n")}`
     : "";
+  const cwdNote = input.cwdSubdir
+    ? `Your working directory is \`${input.cwdSubdir}/\` inside the repository. Listed source paths are repository-relative: when opening those files from this directory, remove the leading \`${input.cwdSubdir}/\`. Report finding paths exactly as listed. The absolute diff-file path is unchanged.`
+    : "";
+  const focusNote = input.focusPaths?.length
+    ? [
+        "Files to reassess (changed since this reviewer's last review):",
+        input.focusPaths.map((p) => `- ${p}`).join("\n"),
+        "The other listed files are context from the same PR. Anchor findings on the reassessed files; cite other files as supporting evidence.",
+      ].join("\n")
+    : "";
+  const callSitesNote = input.callSites?.trim()
+    ? `Call sites of changed exports (outside the diff, repo-relative path:line). Read each one and check it still holds:\n\n${input.callSites.trim()}`
+    : "";
   const diffSection = input.diffPath
     ? [
         "Changed files (the full diff is NOT inlined — explore it yourself):",
@@ -228,9 +287,12 @@ export function buildUserPrompt(input: UserPromptInput): string {
     : ["Diff under review:", renderDiff(input.files)].join("\n\n");
   return [
     environmentLine(input.timezone),
+    cwdNote,
     `PR title: ${input.title}`,
     input.description ? `PR description:\n${input.description}` : "",
     pathNotes,
+    focusNote,
+    callSitesNote,
     diffSection,
   ]
     .filter(Boolean)
@@ -245,8 +307,9 @@ export function buildUserPrompt(input: UserPromptInput): string {
 export function buildVerifySystemPrompt(): string {
   return [
     "You are a strict reviewer verifying another reviewer's findings against a diff.",
-    "For each finding, decide if it is a REAL, correct issue that a careful engineer would agree with, judging only from the diff provided.",
-    "Reject findings that are speculative, based on code not shown, factually wrong about what the diff does, or duplicates.",
+    "For each finding, decide if it is a REAL, correct issue that a careful engineer would agree with.",
+    "Reject a finding only when the supplied diff demonstrates it is incorrect, or it duplicates another finding.",
+    'Missing supporting code is not evidence that a finding is false. If judging it requires code outside the diff, return real: true with reason "outside-diff", unless the diff itself refutes the claim.',
     "Respond with ONE JSON object and nothing else:",
     '{ "verdicts": [ { "index": <finding index>, "real": true|false, "reason": "<short>" } ] }',
     "Include a verdict for every finding index.",

@@ -1,5 +1,8 @@
 import {
+  isDegraded,
+  makeOctokit,
   runReview,
+  type PriorComments,
   type Profile,
   type ReasoningEffort,
   type ReviewResult,
@@ -23,7 +26,7 @@ export type RunInput = {
   readonly subdir?: string;
   readonly dryRun?: boolean;
   readonly model?: string;
-  readonly reasoning: ReasoningEffort;
+  readonly reasoning?: ReasoningEffort;
   readonly guidance?: string;
   readonly reviewerName?: string;
   readonly include?: readonly string[];
@@ -38,6 +41,8 @@ export type RunInput = {
   readonly timezone?: string;
   readonly whipConfig?: WhipConfig;
   readonly maxTurns?: number;
+  readonly priorComments?: PriorComments;
+  readonly procedure?: boolean;
   readonly logger: Logger;
 };
 
@@ -69,7 +74,7 @@ export async function reviewPullRequest(
   });
 
   return runReview({
-    token: input.token,
+    octokit: makeOctokit(input.token, logger),
     ref: {
       owner: input.owner,
       repo: input.repo,
@@ -97,17 +102,23 @@ export async function reviewPullRequest(
     skills: input.skills,
     timezone: input.timezone,
     maxTurns: input.maxTurns,
+    priorComments: input.priorComments,
+    procedure: input.procedure,
     logger,
   });
 }
 
 export function formatResult(result: ReviewResult): string {
+  const d = result.diagnostics;
   return (
     `loupe: ${result.inlineCount} inline comment(s)` +
     (result.droppedCount > 0
       ? `, ${result.droppedCount} off-diff note(s)`
       : "") +
-    (result.requestedChanges ? " — requested changes" : "")
+    (result.requestedChanges ? " — requested changes" : "") +
+    (isDegraded(d)
+      ? ` — degraded (mode=${d.mode}, verify=${d.verify}, scope=${d.incremental}, malformed=${d.malformedDropped.findings + d.malformedDropped.concerns})`
+      : "")
   );
 }
 
@@ -119,7 +130,11 @@ const SEVERITY_MARK: Record<string, string> = {
 
 /** Human-readable rendering of a dry-run review for the terminal. */
 export function renderReview(result: ReviewResult): string {
-  const lines = [`\nSummary: ${result.summary}\n`];
+  const d = result.diagnostics;
+  const lines = [
+    `\nSummary: ${result.summary}\n`,
+    `Run: mode=${d.mode} verify=${d.verify} scope=${d.incremental} malformed=${d.malformedDropped.findings}/${d.malformedDropped.concerns} outOfScope=${d.outOfScopeDropped} profile=${d.profileDropped} verifyDropped=${d.verifyDropped}\n`,
+  ];
   for (const f of [...result.inline, ...result.dropped]) {
     lines.push(`${SEVERITY_MARK[f.severity] ?? "•"} ${f.path}:${f.line}`);
     lines.push(`   ${f.body}\n`);

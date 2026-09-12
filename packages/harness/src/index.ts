@@ -34,6 +34,9 @@ export type WhipConfig = {
  * directory it may read from, the resolved secrets to inject into its subprocess
  * env (e.g. ANTHROPIC_API_KEY), and a logger so subprocess output is observable.
  */
+/** Reasoning effort passed to the harness natively (whip defaultEffort, claude --effort, codex model_reasoning_effort). */
+export type ReasoningEffort = "low" | "medium" | "high";
+
 export type HarnessContext = {
   readonly systemPrompt: string;
   readonly userPrompt: string;
@@ -47,6 +50,11 @@ export type HarnessContext = {
   readonly whipConfig?: WhipConfig;
   /** Cap on the agentic tool loop; harness default (10) when unset. */
   readonly maxTurns?: number;
+  /**
+   * Native reasoning effort. Unset leaves the harness's own default in place
+   * (whip picks a model-aware default; claude/codex use their config).
+   */
+  readonly reasoning?: ReasoningEffort;
   /** Stable prompt-cache key (e.g. repo/reviewer) so the provider reuses the
    * cached system prefix across runs. Passed to whip as -cache-key. */
   readonly cacheKey?: string;
@@ -118,24 +126,42 @@ function runCli(
   });
 }
 
+/** Argument list for `claude -p`; exported so the flag mapping is testable. */
+export function buildClaudeArgs(
+  ctx: Pick<HarnessContext, "systemPrompt" | "model" | "reasoning">,
+): string[] {
+  const args = [
+    "-p",
+    "--permission-mode",
+    "plan",
+    "--append-system-prompt",
+    ctx.systemPrompt,
+  ];
+  if (ctx.model) args.push("--model", ctx.model);
+  if (ctx.reasoning) args.push("--effort", ctx.reasoning);
+  return args;
+}
+
 /** Claude Code CLI: `claude -p` reads the user prompt from stdin. */
 export function claudeHarness(): Harness {
   return {
     name: "claude",
     credentialKeys: ["ANTHROPIC_API_KEY"],
     available: () => commandExists("claude"),
-    review: (ctx) => {
-      const args = [
-        "-p",
-        "--permission-mode",
-        "plan",
-        "--append-system-prompt",
-        ctx.systemPrompt,
-      ];
-      if (ctx.model) args.push("--model", ctx.model);
-      return runCli("claude", args, ctx.userPrompt, ctx);
-    },
+    review: (ctx) =>
+      runCli("claude", buildClaudeArgs(ctx), ctx.userPrompt, ctx),
   };
+}
+
+/** Argument list for `codex exec`; exported so the flag mapping is testable. */
+export function buildCodexArgs(
+  ctx: Pick<HarnessContext, "model" | "reasoning">,
+): string[] {
+  const args = ["exec"];
+  if (ctx.model) args.push("--model", ctx.model);
+  if (ctx.reasoning) args.push("-c", `model_reasoning_effort=${ctx.reasoning}`);
+  args.push("-");
+  return args;
 }
 
 /** OpenAI Codex CLI: `codex exec` runs a one-shot prompt from stdin. */
@@ -145,12 +171,9 @@ export function codexHarness(): Harness {
     credentialKeys: ["OPENAI_API_KEY"],
     available: () => commandExists("codex"),
     review: (ctx) => {
-      const args = ["exec"];
-      if (ctx.model) args.push("--model", ctx.model);
       // Codex has no system-prompt flag; prepend it to the piped input.
       const stdin = `${ctx.systemPrompt}\n\n---\n\n${ctx.userPrompt}`;
-      args.push("-");
-      return runCli("codex", args, stdin, ctx);
+      return runCli("codex", buildCodexArgs(ctx), stdin, ctx);
     },
   };
 }
@@ -211,7 +234,13 @@ function runWhipStreaming(
           log.info("tool call", { name: event["name"], args: event["args"] });
           break;
         case "tool_end":
-          log.info("tool result", { name: event["name"] });
+          log.info("tool result", {
+            name: event["name"],
+            result:
+              typeof event["result"] === "string"
+                ? event["result"].slice(0, 300)
+                : undefined,
+          });
           break;
         case "done":
           final = typeof event["text"] === "string" ? event["text"] : text;
@@ -253,13 +282,19 @@ function runWhipStreaming(
  * (WHIP_HOME) that points whip at it. Keeps loupe's `whip` block out of a
  * developer's real ~/.whip and removes the hand-written config step from CI.
  */
-export function materializeWhipHome(cfg: WhipConfig): Record<string, string> {
+export function materializeWhipHome(
+  cfg: WhipConfig,
+  reasoning?: ReasoningEffort,
+): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "loupe-whip-"));
   const providerKey = cfg.provider.name;
   const defaultModel = cfg.defaultModel ?? cfg.models[0];
   const config = {
     defaultModel,
     defaultProvider: providerKey,
+    // An explicit effort pins whip's reasoning_effort for every request. Left
+    // out, whip picks its model-aware default.
+    ...(reasoning ? { defaultEffort: reasoning } : {}),
     providers: {
       [providerKey]: {
         name: cfg.provider.label ?? providerKey,
@@ -306,7 +341,16 @@ export function whipHarness(): Harness {
         ctx.systemPrompt,
       ];
       if (ctx.model) args.push("-m", ctx.model);
-      const whipEnv = ctx.whipConfig ? materializeWhipHome(ctx.whipConfig) : {};
+      const whipEnv = ctx.whipConfig
+        ? materializeWhipHome(ctx.whipConfig, ctx.reasoning)
+        : {};
+      if (ctx.reasoning && !ctx.whipConfig) {
+        ctx.logger
+          .child("whip")
+          .warn(
+            "reasoning is set but no whip config block is materialized; whip's own default effort applies",
+          );
+      }
       const runCtx = { ...ctx, env: { ...ctx.env, ...whipEnv } };
       // Stable cache key → the provider reuses the cached prefix across runs.
       // Tolerate an older whip that predates the flag: on "flag not defined:
