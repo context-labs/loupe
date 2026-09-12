@@ -34,6 +34,60 @@
         "**/dist/**"
       ],
       "reasoning": "low"
+    },
+    {
+      "name": "docs",
+      "promptFile": "reviewers/docs.md",
+      "include": [
+        "packages/action/src/**",
+        "packages/core/src/**",
+        "packages/harness/src/**",
+        "action.yml",
+        "README.md",
+        "docs/**",
+        "examples/**"
+      ],
+      "exclude": [
+        "**/*.test.ts",
+        "**/tests/**",
+        "**/dist/**"
+      ],
+      "reasoning": "low",
+      "maxTurns": 7,
+      "pathInstructions": [
+        {
+          "glob": "action.yml",
+          "instruction": "Action inputs are documented in docs/github-action.md and examples/review.example.yml. Check added/removed/renamed inputs and changed defaults against both."
+        },
+        {
+          "glob": "packages/action/src/reviewers.ts",
+          "instruction": "This is the .loupe.json schema. docs/configuration.md has the field tables and examples/.loupe.json is the canonical example; both must list every field with its real default."
+        },
+        {
+          "glob": "packages/action/src/cli.ts",
+          "instruction": "CLI flags are documented in docs/guide.md. Verify flag names, defaults, and the review command's argument format."
+        },
+        {
+          "glob": "packages/action/src/config.ts",
+          "instruction": "Built-in defaults live here. docs/configuration.md, docs/github-action.md, and action.yml descriptions quote them; grep for the old value."
+        },
+        {
+          "glob": "packages/core/src/github.ts",
+          "instruction": "Posted GitHub objects, markers, verdicts, and prior-comment cleanup are described in docs/how-it-works/github-objects.md and docs/how-it-works/first-vs-incremental.md. Diagrams there must match the real call order."
+        },
+        {
+          "glob": "packages/core/src/prompt.ts",
+          "instruction": "Prompt layers and the output contract are described in docs/how-it-works/context.md and the system-prompt section of docs/configuration.md."
+        },
+        {
+          "glob": "packages/core/src/index.ts",
+          "instruction": "The review pipeline is described step by step in docs/how-it-works/review-run.md; the flowchart and numbered steps must match."
+        },
+        {
+          "glob": "packages/action/src/respond.ts",
+          "instruction": "Chat commands are documented in docs/how-it-works/chat.md; the HELP constant and the docs must list the same commands."
+        }
+      ]
     }
   ]
 }
