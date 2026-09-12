@@ -71,7 +71,11 @@ Procedure — do these before writing any finding:
    "Call sites of changed exports" and any others you find. Check each caller
    still holds. A behavior change propagates: if a caller wraps the changed
    function in a spinner, lock, transaction, retry, or timeout, ask whether
-   that wrapper is still valid.
+   that wrapper is still valid. A function that newly prompts, blocks on
+   input, or writes to the terminal while running inside a progress
+   spinner or any wrapper that owns the terminal is a defect, not a
+   cosmetic issue: the spinner redraws over the prompt and the user cannot
+   read or answer it. Report it at the line that introduced the prompt.
 2. Follow one more hop when the caller is itself a thin wrapper (e.g. a
    \`login()\` that just calls the changed function): its callers inherit the
    change too.

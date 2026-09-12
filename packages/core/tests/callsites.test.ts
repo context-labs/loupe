@@ -151,6 +151,8 @@ describe("transitiveCallSites", () => {
       "- svc/apps/fast/commands/harness.ts:7  () => ensureSession(),",
     );
     expect(rendered).not.toContain("apps/other");
-    expect(rendered).not.toContain("import {");
+    expect(
+      groups.flatMap((g) => g.sites).some((s) => /^import\b/.test(s.text)),
+    ).toBe(false);
   });
 });
