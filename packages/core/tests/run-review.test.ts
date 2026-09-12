@@ -38,6 +38,7 @@ const marker = `<!-- loupe:code sha=${SHA_A} -->`;
 function checkout(): string {
   const dir = mkdtempSync(join(tmpdir(), "loupe-e2e-"));
   mkdirSync(join(dir, "svc", "cmd"), { recursive: true });
+  writeFileSync(join(dir, "svc", "package.json"), "{}");
   writeFileSync(
     join(dir, "svc", "cmd", "run.ts"),
     "await withProgress(() => selectThing());\n",

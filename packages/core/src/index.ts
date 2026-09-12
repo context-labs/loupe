@@ -333,7 +333,12 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   // checkout so the agent does not spend its turn budget grepping for them.
   // Diff paths are repo-relative; the checkout cwd is the subdir, so strip the
   // prefix to exclude/grep and add it back when rendering.
-  const changed = treeMode ? changedExports(scopedFiles) : [];
+  const changed = treeMode
+    ? changedExports(scopedFiles).map((c) => ({
+        ...c,
+        file: c.file.slice(prefix.length),
+      }))
+    : [];
   const callSites = treeMode
     ? renderCallSites(
         transitiveCallSites(
@@ -345,7 +350,9 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       )
     : "";
   if (callSites) {
-    logger.info("Located call sites of changed exports", { exports: changed });
+    logger.info("Located call sites of changed exports", {
+      exports: changed.map((c) => c.name),
+    });
   }
   const commonPrompt = {
     title: pull.title,
