@@ -59,6 +59,16 @@ describe("parseReviewOutput", () => {
     expect(() => parseReviewOutput('{"status":"done"}')).toThrow(
       /not a review/,
     );
+    expect(() =>
+      parseReviewOutput('{"summary":"s","findings":"none"}'),
+    ).toThrow(/not a review/);
+  });
+
+  it("accepts a clean review that omits the findings array", () => {
+    const { review } = parseReviewOutput('{"summary":"No defects found."}');
+    expect(review.summary).toBe("No defects found.");
+    expect(review.findings).toEqual([]);
+    expect(review.concerns).toEqual([]);
   });
 
   it("counts malformed findings it had to drop", () => {
