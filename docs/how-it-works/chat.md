@@ -26,7 +26,7 @@ Every reply is a top-level issue comment via `issues.createComment`. Chat never 
 
 ## `@loupe review`
 
-Same pipeline as a push, with `full` forced. See [First run vs later runs](./first-vs-incremental.md#forced-full-run). All configured reviewers run.
+Same pipeline as a push, with `full` forced. See [First run vs later runs](./first-vs-incremental.md#forced-full-run). All configured reviewers run. Each reviewer's summary comment is updated in place, so when the run finishes the "🔍 On it" ack is edited into a completion line: the head SHA, one verdict per reviewer, and a note when no changed file fell under the config's `dir`.
 
 ## `@loupe <question>`
 

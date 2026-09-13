@@ -9,7 +9,9 @@ import {
   fetchPullContext,
   makeOctokit,
   postIssueComment,
+  updateIssueComment,
   type PullRef,
+  type ReviewResult,
 } from "@loupe/core";
 import { resolveCredentials } from "@loupe/credentials";
 import { getHarness } from "@loupe/harness";
@@ -18,7 +20,7 @@ import type { Octokit } from "@octokit/rest";
 import { z } from "zod";
 
 import type { Config } from "./config";
-import { runReviews } from "./orchestrate";
+import { runReviews, type ReviewerOutcome } from "./orchestrate";
 
 const MENTION = /@loupe\b/i;
 
@@ -41,6 +43,49 @@ async function postFailure(
     ref,
     `⚠️ I couldn't complete the ${what} — ${reason.slice(0, 500)}\n\nSee the Actions run logs for details.`,
   );
+}
+
+/** One reviewer's line in the re-review completion comment. */
+function outcomeLine(o: ReviewerOutcome): string {
+  if (!o.ok) return `${o.name}: ⚠️ failed (see the failure comment)`;
+  const r: ReviewResult = o.result;
+  if (
+    r.inlineCount === 0 &&
+    r.summary.startsWith("No changed files in scope")
+  ) {
+    return `${o.name}: no changed files in scope`;
+  }
+  const n = (s: "blocker" | "warning" | "nit"): number =>
+    r.inline.filter((f) => f.severity === s).length;
+  const bits = [
+    n("blocker") ? `🔴 ${n("blocker")}` : "",
+    n("warning") ? `🟡 ${n("warning")}` : "",
+    n("nit") ? `🔵 ${n("nit")}` : "",
+  ].filter(Boolean);
+  const verdict = bits.length ? bits.join(" ") : "✅ no issues";
+  return `${o.name}: ${verdict}${r.requestedChanges ? " (changes requested)" : ""}`;
+}
+
+/**
+ * The comment that replaces the "On it" ack once a forced re-review finishes.
+ * Summaries are updated in place higher up the thread, so without this the
+ * only evidence a re-review ran is an "edited" label the reader never sees.
+ */
+export function renderReviewCompletion(
+  outcomes: readonly ReviewerOutcome[],
+  headSha: string,
+  subdir: string | undefined,
+): string {
+  const lines = outcomes.map((o) => `- ${outcomeLine(o)}`).join("\n");
+  const noneInScope =
+    outcomes.length > 0 &&
+    outcomes.every(
+      (o) => o.ok && o.result.summary.startsWith("No changed files in scope"),
+    );
+  const scopeNote = noneInScope
+    ? `\n\nNothing to review: this loupe config covers ${subdir ? `\`${subdir}/\`` : "the whole repo"} and no changed file is under it.`
+    : "\n\nEach reviewer's summary comment above was updated in place.";
+  return `✅ Re-review of \`${headSha.slice(0, 7)}\` done.\n\n${lines}${scopeNote}`;
 }
 
 const HELP = `**loupe commands** (mention \`@loupe\`):
@@ -179,12 +224,23 @@ export async function handleComment(
 
   if (/^(full\s+)?review\b/i.test(instruction)) {
     logger.info("Chat command: review");
-    await postIssueComment(octokit, ref, "🔍 On it — re-reviewing this PR.");
+    const ackId = await postIssueComment(
+      octokit,
+      ref,
+      "🔍 On it — re-reviewing this PR.",
+    );
     try {
       // Reviewer failures are already reported per reviewer by runReviews;
       // only a setup error reaches the catch below.
-      const ok = await runReviews(config, logger, true);
-      if (!ok) process.exitCode = 1;
+      const outcomes = await runReviews(config, logger, true);
+      if (outcomes.some((o) => !o.ok)) process.exitCode = 1;
+      const { data: pr } = await octokit.pulls.get(ref);
+      await updateIssueComment(
+        octokit,
+        ref,
+        ackId,
+        renderReviewCompletion(outcomes, pr.head.sha, config.subdir),
+      );
     } catch (err) {
       await postFailure(octokit, ref, "review", err, logger);
     }

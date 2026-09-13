@@ -1,26 +1,31 @@
-import { makeOctokit, postIssueComment } from "@loupe/core";
+import { makeOctokit, postIssueComment, type ReviewResult } from "@loupe/core";
 import type { Logger } from "@loupe/logger";
 
 import type { Config } from "./config";
 import { loadReviewers } from "./reviewers";
 import { formatResult, reviewPullRequest, type RunInput } from "./run";
 
+/** What one reviewer did: its result, or the failure that was reported on the PR. */
+export type ReviewerOutcome =
+  | { readonly name: string; readonly ok: true; readonly result: ReviewResult }
+  | { readonly name: string; readonly ok: false; readonly error: string };
+
 /**
  * Run one reviewer, reporting its own failure on the PR so a broken reviewer
- * never reads as silence. Returns false on failure. The comment carries a
- * bounded reason and no marker or SHA, so it can never be mistaken for a
- * review or advance incremental state.
+ * never reads as silence. The failure comment carries a bounded reason and no
+ * marker or SHA, so it can never be mistaken for a review or advance
+ * incremental state.
  */
 async function runOne(
   config: Config,
   input: RunInput,
   label: string,
   logger: Logger,
-): Promise<boolean> {
+): Promise<ReviewerOutcome> {
   try {
     const result = await reviewPullRequest(input);
     logger.info(`[${label}] ${formatResult(result)}`);
-    return true;
+    return { name: label, ok: true, result };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     logger.error(`[${label}] review failed`, { error: reason });
@@ -39,7 +44,7 @@ async function runOne(
         error: postErr instanceof Error ? postErr.message : String(postErr),
       });
     }
-    return false;
+    return { name: label, ok: false, error: reason };
   }
 }
 
@@ -47,15 +52,14 @@ async function runOne(
  * Run the configured review(s) for a PR — either the reviewer profiles from
  * `.loupe.json`, or a single default review. Shared by the pull_request entry
  * (main) and the `@loupe review` chat command. `overrideFull` forces a whole-PR
- * review regardless of config. Reviewer failures are reported on the PR here;
- * the returned boolean is false when any reviewer failed. Only setup errors
- * (bad config) reject.
+ * review regardless of config. Reviewer failures are reported on the PR here
+ * and returned as outcomes. Only setup errors (bad config) reject.
  */
 export async function runReviews(
   config: Config,
   logger: Logger,
   overrideFull?: boolean,
-): Promise<boolean> {
+): Promise<ReviewerOutcome[]> {
   const full = overrideFull ?? config.full;
   const base = {
     token: config.token,
@@ -81,7 +85,7 @@ export async function runReviews(
     logger.info("Running reviewers", {
       reviewers: reviewers.map((r) => r.name),
     });
-    const ok = await Promise.all(
+    return Promise.all(
       reviewers.map((r) =>
         runOne(
           config,
@@ -114,27 +118,28 @@ export async function runReviews(
         ),
       ),
     );
-    return ok.every(Boolean);
   }
 
-  return runOne(
-    config,
-    {
-      ...base,
-      model: config.model,
-      reasoning: config.reasoning,
-      profile: config.profile,
-      guidance: config.guidance,
-      ensembleModels: config.ensembleModels.length
-        ? config.ensembleModels
-        : undefined,
-      skills: config.skills.length ? config.skills : undefined,
-      timezone: config.timezone,
-      priorComments: config.priorComments,
-      procedure: config.procedure,
+  return [
+    await runOne(
+      config,
+      {
+        ...base,
+        model: config.model,
+        reasoning: config.reasoning,
+        profile: config.profile,
+        guidance: config.guidance,
+        ensembleModels: config.ensembleModels.length
+          ? config.ensembleModels
+          : undefined,
+        skills: config.skills.length ? config.skills : undefined,
+        timezone: config.timezone,
+        priorComments: config.priorComments,
+        procedure: config.procedure,
+        logger,
+      },
+      "default",
       logger,
-    },
-    "default",
-    logger,
-  );
+    ),
+  ];
 }

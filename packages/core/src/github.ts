@@ -125,16 +125,32 @@ export async function getLastReviewed(
   return { unknown: false };
 }
 
-/** Post a top-level PR comment (used for chat replies). */
+/** Post a top-level PR comment (used for chat replies). Returns the comment id. */
 export async function postIssueComment(
   octokit: Octokit,
   ref: PullRef,
   body: string,
-): Promise<void> {
-  await octokit.issues.createComment({
+): Promise<number> {
+  const { data } = await octokit.issues.createComment({
     owner: ref.owner,
     repo: ref.repo,
     issue_number: ref.pull_number,
+    body,
+  });
+  return data.id;
+}
+
+/** Replace the body of a top-level PR comment (e.g. turn an "On it" ack into its result). */
+export async function updateIssueComment(
+  octokit: Octokit,
+  ref: PullRef,
+  commentId: number,
+  body: string,
+): Promise<void> {
+  await octokit.issues.updateComment({
+    owner: ref.owner,
+    repo: ref.repo,
+    comment_id: commentId,
     body,
   });
 }
