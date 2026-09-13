@@ -35,7 +35,8 @@ export type ParsedReview = {
  * or code fences, so we grab the last balanced {...} block and validate it.
  * Throws if no recognizable review object is found — a malformed review is a
  * hard failure, not a silent empty review. "Recognizable" means the object
- * carries a string `summary` and an array `findings`; an unrelated object like
+ * carries a string `summary`; `findings` and `concerns` may be omitted for a
+ * clean review but must be arrays when present. An unrelated object like
  * `{"status":"done"}` must not parse as an empty clean review.
  */
 export function parseReviewOutput(stdout: string): ParsedReview {
@@ -56,14 +57,22 @@ export function parseReviewOutput(stdout: string): ParsedReview {
   }
   const candidate = extractLastJsonObject(stdout) ?? stdout.slice(start);
   const parsed: unknown = parseLenient(candidate);
+  const shape = parsed as {
+    summary?: unknown;
+    findings?: unknown;
+    concerns?: unknown;
+  } | null;
+  const isArrayOrAbsent = (v: unknown): boolean =>
+    v === undefined || Array.isArray(v);
   if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    typeof (parsed as { summary?: unknown }).summary !== "string" ||
-    !Array.isArray((parsed as { findings?: unknown }).findings)
+    typeof shape !== "object" ||
+    shape === null ||
+    typeof shape.summary !== "string" ||
+    !isArrayOrAbsent(shape.findings) ||
+    !isArrayOrAbsent(shape.concerns)
   ) {
     throw new Error(
-      `Harness output is not a review (needs a string "summary" and an array "findings"):\n${candidate.slice(0, 1000)}`,
+      `Harness output is not a review (needs a string "summary"; "findings"/"concerns" must be arrays when present):\n${candidate.slice(0, 1000)}`,
     );
   }
   const { summary, findings, concerns, highlights, diagram } =
