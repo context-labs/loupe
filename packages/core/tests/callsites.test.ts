@@ -156,3 +156,42 @@ describe("transitiveCallSites", () => {
     ).toBe(false);
   });
 });
+
+describe("elixir", () => {
+  it("treats def/defmacro as changed exports and mix.exs as the package root", () => {
+    const names = changedExports([
+      {
+        path: "engine/lib/router.ex",
+        patch: [
+          "@@ -1,3 +1,3 @@ defmodule Engine.Router do",
+          "-  def resolve(deployment), do: :ok",
+          "+  def resolve(deployment, timeout), do: :ok",
+          "+  defp helper(x), do: x",
+        ].join("\n"),
+      },
+    ]);
+    expect(names).toEqual([{ name: "resolve", file: "engine/lib/router.ex" }]);
+
+    const cwd = mkdtempSync(join(tmpdir(), "loupe-ex-"));
+    mkdirSync(join(cwd, "engine/lib"), { recursive: true });
+    writeFileSync(join(cwd, "engine/mix.exs"), "");
+    writeFileSync(
+      join(cwd, "engine/lib/router.ex"),
+      "def resolve(d, t), do: :ok\n",
+    );
+    writeFileSync(
+      join(cwd, "engine/lib/handler.ex"),
+      "def call(conn) do\n  Router.resolve(conn.deployment)\nend\n",
+    );
+    expect(packageRoot(cwd, "engine/lib/router.ex")).toBe("engine");
+    const sites = findCallSites(
+      cwd,
+      ["resolve"],
+      new Set(["engine/lib/router.ex"]),
+      "engine",
+    );
+    expect(sites.get("resolve")!.map((s) => `${s.path}:${s.line}`)).toEqual([
+      "engine/lib/handler.ex:2",
+    ]);
+  });
+});

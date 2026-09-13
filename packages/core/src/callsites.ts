@@ -7,8 +7,9 @@ import type { DiffFile } from "./diff";
 /** An exported value the diff touches, with the file that declares it. */
 export type ChangedExport = { readonly name: string; readonly file: string };
 
+/** TS/JS `export function foo` … and Elixir `def foo(`/`defmacro foo(` (public only; defp is private). */
 const VALUE_DECL =
-  /export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/;
+  /export\s+(?:default\s+)?(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)|^\s*def(?:macro)?\s+([a-z_][\w?!]*)/;
 
 /**
  * Exported values (not types) the diff touches: a declaration line it adds or
@@ -26,7 +27,8 @@ export function changedExports(files: readonly DiffFile[]): ChangedExport[] {
       let text: string | undefined;
       if (line.startsWith("@@")) text = line.replace(/^@@[^@]*@@\s*/, "");
       else if (/^[+\- ]/.test(line)) text = line.slice(1);
-      const name = text ? VALUE_DECL.exec(text)?.[1] : undefined;
+      const m = text ? VALUE_DECL.exec(text) : null;
+      const name = m ? (m[1] ?? m[2]) : undefined;
       if (!name) continue;
       const key = `${f.path}\0${name}`;
       if (seen.has(key)) continue;
@@ -45,7 +47,24 @@ export type CallSite = {
   readonly context?: readonly string[];
 };
 
-const SOURCE_GLOBS = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"];
+const SOURCE_GLOBS = [
+  "*.ts",
+  "*.tsx",
+  "*.js",
+  "*.jsx",
+  "*.mjs",
+  "*.cjs",
+  "*.ex",
+  "*.exs",
+];
+/** Files that mark a package root; callers of a package's exports live inside it. */
+const PACKAGE_MARKERS = [
+  "package.json",
+  "mix.exs",
+  "go.mod",
+  "Cargo.toml",
+  "pyproject.toml",
+];
 const EXCLUDE_DIRS = ["node_modules", "dist", "build", ".git", "coverage"];
 /** Test code calls everything and breaks nothing at runtime; it only crowds out real callers. */
 const TEST_PATH =
@@ -60,7 +79,7 @@ const TEST_PATH =
 export function packageRoot(cwd: string, file: string): string {
   let dir = dirname(file);
   while (dir !== "." && dir !== "/" && dir !== "") {
-    if (existsSync(join(cwd, dir, "package.json"))) return dir;
+    if (PACKAGE_MARKERS.some((m) => existsSync(join(cwd, dir, m)))) return dir;
     dir = dirname(dir);
   }
   return "";
