@@ -58,7 +58,7 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 | `--timezone <tz>` | `UTC` | Timezone label for the review environment line (e.g. `PST`). |
 | `--ensemble <models>` | — | Run several models; keep findings a majority agree on. |
 | `--full` | off | Whole-PR review instead of the incremental delta. |
-| `-d, --dir <subdir>` | — | Restrict to a subdirectory (e.g. `inference`). |
+| `-d, --dir <dirs>` | — | Restrict to one or more directories, comma-separated (e.g. `inference,elixir_engine`). |
 | `--config <path>` | — | `.loupe.json` reviewer profiles; runs each match. |
 | `--reviewer <name>` | — | Run only one named reviewer from `--config`. |
 | `--prompt-file <path>` | — | Custom reviewer guidance (single-reviewer mode). |

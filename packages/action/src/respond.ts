@@ -74,7 +74,7 @@ function outcomeLine(o: ReviewerOutcome): string {
 export function renderReviewCompletion(
   outcomes: readonly ReviewerOutcome[],
   headSha: string,
-  subdir: string | undefined,
+  dirs: readonly string[] | undefined,
 ): string {
   const lines = outcomes.map((o) => `- ${outcomeLine(o)}`).join("\n");
   const noneInScope =
@@ -83,7 +83,7 @@ export function renderReviewCompletion(
       (o) => o.ok && o.result.summary.startsWith("No changed files in scope"),
     );
   const scopeNote = noneInScope
-    ? `\n\nNothing to review: this loupe config covers ${subdir ? `\`${subdir}/\`` : "the whole repo"} and no changed file is under it.`
+    ? `\n\nNothing to review: this loupe config covers ${dirs?.length ? dirs.map((d) => `\`${d}/\``).join(", ") : "the whole repo"} and no changed file is under it.`
     : "\n\nEach reviewer's summary comment above was updated in place.";
   return `✅ Re-review of \`${headSha.slice(0, 7)}\` done.\n\n${lines}${scopeNote}`;
 }
@@ -239,7 +239,7 @@ export async function handleComment(
         octokit,
         ref,
         ackId,
-        renderReviewCompletion(outcomes, pr.head.sha, config.subdir),
+        renderReviewCompletion(outcomes, pr.head.sha, config.dirs),
       );
     } catch (err) {
       await postFailure(octokit, ref, "review", err, logger);

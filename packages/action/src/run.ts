@@ -23,7 +23,7 @@ export type RunInput = {
   readonly workdir: string;
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
-  readonly subdir?: string;
+  readonly dirs?: readonly string[];
   readonly dryRun?: boolean;
   readonly model?: string;
   readonly reasoning?: ReasoningEffort;
@@ -85,7 +85,7 @@ export async function reviewPullRequest(
     harnessEnv,
     whipConfig: input.whipConfig,
     conventionPaths: input.conventionPaths,
-    subdir: input.subdir,
+    dirs: input.dirs,
     dryRun: input.dryRun,
     model: input.model,
     reasoning: input.reasoning,

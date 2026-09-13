@@ -48,7 +48,7 @@ describe("renderReviewCompletion", () => {
     const body = renderReviewCompletion(
       [clean("code"), warned, { name: "docs", ok: false, error: "boom" }],
       "c61996e".padEnd(40, "0"),
-      "inference",
+      ["inference"],
     );
     expect(body).toContain("✅ Re-review of `c61996e` done.");
     expect(body).toContain("- code: ✅ no issues");
@@ -61,11 +61,11 @@ describe("renderReviewCompletion", () => {
     const body = renderReviewCompletion(
       [outOfScope("code"), outOfScope("zdr")],
       "7".repeat(40),
-      "inference",
+      ["inference", "elixir_engine"],
     );
     expect(body).toContain("- code: no changed files in scope");
     expect(body).toContain(
-      "covers `inference/` and no changed file is under it",
+      "covers `inference/`, `elixir_engine/` and no changed file is under it",
     );
     expect(body).not.toContain("updated in place");
   });

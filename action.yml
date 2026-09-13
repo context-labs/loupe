@@ -36,7 +36,7 @@ inputs:
     required: false
     default: "CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md"
   dir:
-    description: "Restrict the review to a repo subdirectory (e.g. inference). Overrides .loupe.json."
+    description: "Restrict the review to one or more repo directories, comma-separated (e.g. inference,elixir_engine). Several are reviewed together from the repo root. Overrides .loupe.json."
     required: false
     default: ""
   config:

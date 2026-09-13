@@ -7,7 +7,7 @@ import { createRootLogger, shutdownLogger } from "@loupe/logger";
 import { Command } from "commander";
 
 import { resolveProviders } from "./config";
-import { loadReviewers, loadSettings } from "./reviewers";
+import { asDirs, loadReviewers, loadSettings } from "./reviewers";
 import { formatResult, renderReview, reviewPullRequest } from "./run";
 
 const REASONING: readonly ReasoningEffort[] = ["low", "medium", "high"];
@@ -104,8 +104,8 @@ program
     "CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md",
   )
   .option(
-    "-d, --dir <subdir>",
-    "restrict review to a repo subdirectory (e.g. inference)",
+    "-d, --dir <dirs>",
+    "restrict review to repo directories, comma-separated (e.g. inference,elixir_engine)",
   )
   .option(
     "--config <path>",
@@ -196,7 +196,7 @@ program
           opts.profile ?? settings.profile ?? "chill",
         );
         const timezone = opts.timezone ?? settings.timezone ?? "UTC";
-        const subdir = opts.dir ?? settings.dir;
+        const dirs = asDirs(opts.dir) ?? settings.dirs;
         const maxTurns = opts.maxTurns ?? settings.maxTurns;
         const ensembleModels = opts.ensemble
           ? opts.ensemble
@@ -225,7 +225,7 @@ program
             env: opts.infisicalEnv,
             projectId: opts.infisicalProject,
           }),
-          subdir,
+          dirs,
           dryRun: opts.dryRun,
           verify: opts.verify,
           full: opts.full,
@@ -272,6 +272,7 @@ program
                 maxTurns: r.maxTurns ?? maxTurns,
                 priorComments: r.priorComments ?? priorComments,
                 procedure: r.procedure ?? settings.procedure,
+                dirs: r.dirs ?? dirs,
                 logger,
               });
               logger.info(`[${r.name}] ${formatResult(result)}`);

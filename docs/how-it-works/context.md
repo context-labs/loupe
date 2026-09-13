@@ -50,7 +50,7 @@ Order matters for caching. Everything here is identical across PRs for a given r
 ## User message
 
 - Environment line with the current date and time in the configured `timezone`.
-- When `dir` is set and the harness runs inside it: "Your working directory is `<dir>/` inside the repository. Listed paths are repository-relative; drop the prefix when opening files, report `path` exactly as listed."
+- When `dir` names one directory and the harness runs inside it: "Your working directory is `<dir>/` inside the repository. Listed paths are repository-relative; drop the prefix when opening files, report `path` exactly as listed." With several directories the harness runs at the repo root and no note is needed.
 - PR title and body.
 - `pathInstructions` whose glob matches at least one reassessed file, one bullet each.
 - On an incremental run: "Files to reassess", then "the other listed files are context".

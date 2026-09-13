@@ -198,7 +198,7 @@ function request(
     workdir,
     harnessEnv: {},
     conventionPaths: ["AGENTS.md"],
-    subdir: "svc",
+    dirs: ["svc"],
     reviewerName: "code",
     logger,
     ...extra,

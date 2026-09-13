@@ -32,6 +32,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `name` | yes | Label on the posted review; also the comment marker for de-dup. |
 | `prompt` or `promptFile` | one | Reviewer guidance. `promptFile` resolves relative to the config file. |
 | `include` | no | Globs; reviewer runs only when a changed file matches. **Omit = the whole PR.** |
+| `dir` | no | One directory or a list. Overrides the top-level `dir` for this reviewer. |
 | `exclude` | no | Globs removed from scope (lockfiles, generated output, …). |
 | `model` | no | Overrides the run's model for this reviewer. |
 | `reasoning` | no | `low` \| `medium` \| `high`. Passed to the harness natively (whip `defaultEffort` in the materialized `WHIP_HOME`, `claude --effort`, codex `model_reasoning_effort`) and noted in the prompt. Unset = the harness's own default. whip without a `whip` config block keeps its own default effort; only the prompt note applies. |
@@ -44,8 +45,23 @@ whose globs match a changed file and posts each as its own labeled review
 | `procedure` | no | `false` drops the always-on review procedure (caller check, wrapper rule) from this reviewer's prompt. Also a top-level default. |
 | `priorComments` | no | What happens to this reviewer's earlier inline comments on a re-review: `resolve` (default: resolve the thread, history kept) \| `delete` \| `keep` (leave them, new comments accumulate). Also a top-level default and the `prior-comments` Action input / `--prior-comments` flag. |
 
-Globs are matched with `Bun.Glob` against repo-relative paths. `include` also
-composes with `--dir` (subdir scope).
+Globs are matched against repo-relative paths. `include` composes with `dir`.
+
+### `dir`: one directory or several
+
+Top level or per reviewer, a string or a list:
+
+```jsonc
+{ "dir": "inference" }                         // one directory
+{ "dir": ["inference", "elixir_engine"] }      // two systems reviewed together
+```
+
+Only changed files under a listed directory are in scope, and convention docs
+(`AGENTS.md`, …) are read from each. With one directory the harness runs inside
+it and the prompt explains the path mapping. With several it runs at the repo
+root so the agent reads both sides of a change in one review. The Action input
+and `--dir` flag take a comma-separated list. A single string keeps working as
+before.
 
 Run all matching reviewers, or one:
 

@@ -70,7 +70,7 @@ export async function runReviews(
     workdir: config.workdir,
     conventionPaths: config.conventionPaths,
     providers: config.providers,
-    subdir: config.subdir,
+    dirs: config.dirs,
     verify: config.verify,
     whipConfig: config.whipConfig,
     maxTurns: config.maxTurns,

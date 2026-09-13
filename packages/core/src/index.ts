@@ -84,11 +84,12 @@ export type ReviewRequest = {
   /** Convention doc paths to pull from the target repo, in priority order. */
   readonly conventionPaths: readonly string[];
   /**
-   * Restrict the review to a subdirectory of the repo (e.g. "inference").
-   * Only changed files under it are reviewed, convention docs are read from it,
-   * and the harness runs with it as its working directory.
+   * Restrict the review to one or more repo directories (e.g. ["inference",
+   * "elixir_engine"]). Only changed files under them are reviewed and
+   * convention docs are read from each. With one dir the harness runs inside
+   * it; with several it runs at the repo root so the agent sees every dir.
    */
-  readonly subdir?: string;
+  readonly dirs?: readonly string[];
   /** Compute and log the review without posting it to the PR. */
   readonly dryRun?: boolean;
   /** Model id passed to the harness (e.g. "kimi-k3"). */
@@ -102,7 +103,7 @@ export type ReviewRequest = {
   readonly guidance?: string;
   /** Named reviewer profile; labels the posted review (e.g. "migrations"). */
   readonly reviewerName?: string;
-  /** Only review changed files matching these globs (in addition to subdir). */
+  /** Only review changed files matching these globs (in addition to dirs). */
   readonly include?: readonly string[];
   /** Exclude changed files matching these globs. */
   readonly exclude?: readonly string[];
@@ -163,16 +164,25 @@ const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
 /** End-to-end: fetch PR + conventions, run the harness, post the review. */
 export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   const { logger } = req;
-  const subdir = req.subdir?.replace(/^\/+|\/+$/g, "");
+  const dirs = (req.dirs ?? [])
+    .map((d) => d.replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean);
+  // A single dir scopes the harness cwd and the path prefix; several dirs share
+  // the repo root, so no prefix is stripped and no cwd note is needed.
+  const subdir = dirs.length === 1 ? dirs[0] : undefined;
   const prefix = subdir ? `${subdir}/` : "";
-  const conventionPaths = req.conventionPaths.map((p) => `${prefix}${p}`);
+  const prefixes = dirs.map((d) => `${d}/`);
+  const conventionPaths =
+    dirs.length > 0
+      ? dirs.flatMap((d) => req.conventionPaths.map((p) => `${d}/${p}`))
+      : [...req.conventionPaths];
 
   logger.info("Reviewing pull request", {
     repo: `${req.ref.owner}/${req.ref.repo}`,
     pull: req.ref.pull_number,
     reviewer: req.reviewerName ?? "default",
     harness: req.harness.name,
-    subdir: subdir ?? null,
+    dirs,
   });
 
   const { octokit } = req;
@@ -200,7 +210,9 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     ? picomatch([...req.exclude], { dot: true })
     : undefined;
   const scopedFiles = pull.files.filter((f) => {
-    if (subdir && !f.path.startsWith(prefix)) return false;
+    if (prefixes.length > 0 && !prefixes.some((p) => f.path.startsWith(p))) {
+      return false;
+    }
     if (include && !include(f.path)) return false;
     if (exclude && exclude(f.path)) return false;
     return true;
@@ -220,9 +232,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   });
 
   if (scopedFiles.length === 0) {
-    logger.info("No changed files in scope; nothing to review", {
-      subdir: subdir ?? null,
-    });
+    logger.info("No changed files in scope; nothing to review", { dirs });
     return emptyResult("No changed files in scope.");
   }
 

@@ -11,7 +11,7 @@ import {
 import type { WhipConfig } from "@loupe/harness";
 import { z } from "zod";
 
-import { loadSettings, type LoupeSettings } from "./reviewers";
+import { asDirs, loadSettings, type LoupeSettings } from "./reviewers";
 
 /** An empty string from an unset Action input counts as "not provided". */
 const optionalInput = z
@@ -105,7 +105,8 @@ export type Config = {
   readonly workdir: string;
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
-  readonly subdir?: string;
+  /** Directories in scope; several are reviewed together from the repo root. */
+  readonly dirs?: readonly string[];
   readonly model: string;
   /** Unset = harness default effort and no reasoning note in the prompt. */
   readonly reasoning?: ReasoningEffort;
@@ -154,7 +155,7 @@ export function loadConfig(): Config {
       .map((p) => p.trim())
       .filter(Boolean),
     providers: buildProviders(env),
-    subdir: env.LOUPE_DIR ?? file.dir,
+    dirs: asDirs(env.LOUPE_DIR) ?? file.dirs,
     model: env.LOUPE_MODEL ?? file.model ?? "kimi-k3",
     reasoning: asReasoning(env.LOUPE_REASONING) ?? file.reasoning,
     guidance: env.LOUPE_PROMPT_FILE
