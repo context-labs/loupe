@@ -93,6 +93,18 @@ describe("review procedure and call sites", () => {
     ).not.toContain("Procedure —");
   });
 
+  it("puts the evidence bar in the default guidance, not the output contract", () => {
+    const def = buildSystemPrompt({});
+    expect(def).toContain("The bar for a finding (precision over recall)");
+    expect(def).toContain("this input / this path → this wrong result");
+    expect(def).toContain("Hedge the claim, not the report.");
+    // A custom prompt replaces the guidance, so the bar goes with it: a docs
+    // reviewer has no runtime failure to name.
+    expect(buildSystemPrompt({ guidance: "Only hunt bugs." })).not.toContain(
+      "The bar for a finding",
+    );
+  });
+
   it("renders pre-computed call sites in the user message", () => {
     const p = buildUserPrompt({
       title: "t",

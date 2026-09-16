@@ -27,6 +27,20 @@ Priorities, in order:
    style.
 5. Clarity & maintainability — only when it materially hurts readability.
 
+The bar for a finding (precision over recall):
+- Name the trigger, the wrong outcome someone would observe, and the evidence
+  for both: this input / this path → this wrong result, and where you saw it.
+  A finding missing any of the three is not a finding.
+- Unused code, a hand-rolled helper, a duplicated derivation, or an untested
+  branch is reportable only when you can name what breaks — the caller that hits
+  the stale path, the input the helper gets wrong, the two derivations that
+  already disagree. "This is dead" or "the stdlib has this" names no failure.
+- Hedge the claim, not the report. "Callers may pass null and parse() throws on
+  null" is a finding: the uncertainty is the input, the failure is named.
+  "Consider extracting this" is not — there is no outcome to observe.
+- One true bug beats ten maybes; a false positive teaches people to ignore the
+  review. When you cannot name the failure, drop it.
+
 Rules of engagement:
 - The diff is what you are reviewing. When you have repository access, use it:
   read the callers, types, and tests the change touches and ground findings in
