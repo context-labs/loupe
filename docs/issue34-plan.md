@@ -8,11 +8,35 @@ one-shot fallback retries them unconditionally (doubling wasted billing calls),
 and the GitHub Action exposes no output a consuming workflow can branch on — so
 ~120 runs can fail silently over 42 hours with every job green.
 
-This plan adds a typed error kind for quota/rate-limit failures, suppresses the
-retry for that kind, and exposes an action output so workflows can gate on it.
+This plan wraps every harness-layer failure in a general HarnessError carrying a
+categorical kind, suppresses the retry for non-retryable kinds (quota,
+rate-limit), and exposes an action output so workflows can gate on it.
 
 Branch: fix/issue34-classify-quota-errors
 Worktree: /Users/anishthite/loupe-issue34
+
+---
+
+## Design choice: general HarnessError + kind, not a dedicated QuotaError
+
+Instead of a single-purpose QuotaError class, every harness-layer failure is a
+HarnessError with a kind discriminant. Rationale:
+
+- Uniform envelope. All three harness reject sites (runCli non-zero exit, whip
+  NDJSON error event, whip non-zero exit) become HarnessError, so a caller can
+  tell "the harness subprocess failed" from unrelated errors (octokit, config)
+  with one instanceof, instead of a mix of HarnessError and bare Error.
+- Extensible without class proliferation. The issue covers quota (402) AND
+  rate-limit (429), which have different operational semantics. A kind union
+  separates them now; adding timeout/spawn later is one union member, not a new
+  class plus a new isXxxError function. Exhaustive switches on kind get TS
+  checking.
+- A retryable boolean would be ambiguous (retryable with backoff vs retryable
+  with a mode switch?), kind is not. The classifier is categorical; core decides
+  per-kind whether the agentic-to-one-shot fallback applies.
+- kind "unknown" preserves today's behavior exactly for anything we cannot
+  classify (still retries, still exits 1). No behavior change except for the
+  quota/rate-limit cases the issue targets.
 
 ---
 
@@ -29,10 +53,11 @@ File: packages/harness/src/index.ts
 - L217 — whip NDJSON "error" event rejects with a bare Error built from
   JSON.stringify(event["error"]).
 - L241 — whip non-zero exit rejects with a bare Error built from code + stderr.
+- L106 / L235 — child.on("error", reject) forwards raw spawn errors (ENOENT,
+  etc.) as bare Errors too.
 
-All three construct a plain Error with the raw message. There is no error class
-anywhere in packages/*/src (confirmed: grep for 402|429|quota|balance returns
-nothing).
+All construct a plain Error. No error class exists anywhere in packages/*/src
+(confirmed: grep for 402|429|quota|balance returns nothing).
 
 ### 2. Unconditional agentic-to-one-shot retry
 File: packages/core/src/index.ts
@@ -54,69 +79,90 @@ File: packages/core/src/index.ts
 
 ## Implementation
 
-### Step 1 — Typed error kind (packages/harness/src/index.ts)
+### Step 1 — HarnessError + kind classifier (packages/harness/src/errors.ts, new)
 
-Add an exported error class and a classifier near the top of the file:
+New file, re-exported from packages/harness/src/index.ts:
 
-    export class QuotaError extends Error {
-      readonly kind = "quota";
+    export type HarnessErrorKind =
+      | "quota"        // 402, insufficient balance, billing — not retryable
+      | "rate-limit"   // 429, rate limit exceeded — mode-switch retry won't help
+      | "unknown";     // unclassified (crash, parse failure, transient) — preserves today's retry
+      // future: | "timeout" | "spawn"
+
+    /**
+     * Every failure from a harness subprocess is wrapped in HarnessError so
+     * callers can distinguish harness failures from other errors and branch on
+     * kind. kind "unknown" preserves today's behavior for unclassified errors.
+     */
+    export class HarnessError extends Error {
+      readonly kind: HarnessErrorKind;
       readonly status?: number;
-      constructor(message: string, status?: number) {
+      constructor(message: string, kind: HarnessErrorKind = "unknown", status?: number) {
         super(message);
-        this.name = "QuotaError";
+        this.name = "HarnessError";
+        this.kind = kind;
         this.status = status;
       }
     }
 
-    // True when a message/status looks like a provider quota or rate-limit hit.
-    export function isQuotaError(err: unknown): boolean {
-      if (err instanceof QuotaError) return true;
-      const msg = err instanceof Error ? err.message : String(err);
-      return /\b(402|429|payment required|insufficient balance|quota|rate limit|billing)\b/i.test(msg);
+    /** Map a raw harness message + optional HTTP status to an error kind. */
+    export function classifyHarnessError(message: string, status?: number): HarnessErrorKind {
+      const s = (message + (status != null ? " " + status : "")).toLowerCase();
+      if (/\b(402|payment required|insufficient balance|quota|billing)\b/.test(s)) return "quota";
+      if (/\b(429|rate limit|too many requests)\b/.test(s)) return "rate-limit";
+      return "unknown";
     }
 
-QuotaError lives in the harness package (where provider output is first parsed).
-Construction sites to update, keeping the existing message text but wrapping as
-QuotaError when the message matches, else a plain Error:
+    /** Kinds where the agentic->one-shot fallback must NOT fire. */
+    const NON_RETRYABLE: readonly HarnessErrorKind[] = ["quota", "rate-limit"];
 
-- L111 (runCli close handler): classify the "exited {code}: {stderr}" message.
-- L217 (whip "error" event): classify the "whip error: {json}" message.
-- L241 (whip close handler): classify the "whip exited {code}: {stderr}" message.
-
-A small helper avoids duplicating the test at each site:
-
-    function rejectClassified(reject, message, status?) {
-      reject(isQuotaLike(message, status) ? new QuotaError(message, status) : new Error(message));
+    export function isNonRetryableHarnessError(err: unknown): boolean {
+      return err instanceof HarnessError && NON_RETRYABLE.includes(err.kind);
     }
 
-Re-export QuotaError / isQuotaError from @loupe/core if core needs the symbol
-directly (it does, for Step 2).
+### Step 2 — Wrap the reject sites (packages/harness/src/index.ts)
 
-### Step 2 — Suppress retry for the typed kind (packages/core/src/index.ts)
+Import HarnessError + classifyHarnessError from ./errors. Replace the three
+reject(new Error(...)) sites, keeping the existing message text:
 
-At L300-306, re-throw immediately when the failure is a quota/rate-limit error
-so a billing failure costs one call per reviewer, not two:
+- L111 (runCli close): reject(new HarnessError(message, classifyHarnessError(message))).
+- L217 (whip "error" event): reject(new HarnessError(message, classifyHarnessError(message))).
+- L241 (whip close): reject(new HarnessError(message, classifyHarnessError(message))).
+
+Also wrap the spawn-error forwards for envelope uniformity (minor):
+
+- L106 / L235: child.on("error", (e) => reject(new HarnessError(e instanceof Error ? e.message : String(e)))).
+
+Status extraction (optional, best-effort): if the message contains an HTTP
+status digit, pass it as the third arg so HarnessError.status is populated for
+telemetry. Not required for the retry/output logic.
+
+### Step 3 — Suppress retry for non-retryable kinds (packages/core/src/index.ts)
+
+At L300-306, re-throw immediately when the failure is a non-retryable harness
+error so a billing failure costs one call per reviewer, not two:
 
     try {
       stdout = await run(agentic);
     } catch (err) {
-      if (!agentic || isQuotaError(err)) throw err;
+      if (!agentic || isNonRetryableHarnessError(err)) throw err;
       logger.warn("Agentic review failed; retrying one-shot from the diff", {
         error: err instanceof Error ? err.message : String(err),
+        kind: err instanceof HarnessError ? err.kind : undefined,
       });
       stdout = await run(false);
     }
 
-Import isQuotaError from @loupe/harness.
+Import isNonRetryableHarnessError + HarnessError from @loupe/harness. kind
+"unknown" still retries, preserving today's behavior for unclassified errors.
 
-### Step 3 — Action output (action.yml + packages/action/src/main.ts)
+### Step 4 — Action output (action.yml + packages/action/src/main.ts)
 
 Composite actions surface outputs by writing name=value lines to $GITHUB_OUTPUT
 from a step. Two changes:
 
 a. packages/action/src/main.ts — write a "status" output on completion and on
-   failure. Add a helper and call it from the success path (after runReviews
-   resolves) and the .catch:
+   failure. Add a helper and a kind-to-status mapper:
 
       function setOutput(name, value) {
         const file = process.env["GITHUB_OUTPUT"];
@@ -124,46 +170,65 @@ a. packages/action/src/main.ts — write a "status" output on completion and on
         appendFileSync(file, name + "=" + value + "\n");
       }
 
-   - On success: setOutput("status", "ok").
-   - In .catch: setOutput("status", "quota") when isQuotaError(err), else
-     setOutput("status", "failed"); then set process.exitCode = 1 as today.
+      function statusForError(err) {
+        if (err instanceof HarnessError) {
+          if (err.kind === "quota") return "quota";
+          if (err.kind === "rate-limit") return "rate-limit";
+        }
+        return "failed";
+      }
 
-   runReviews currently returns void and propagates thrown errors to the
-   .catch, so no signature change is needed — classification lives in
-   isQuotaError.
+   - On success (after runReviews resolves): setOutput("status", "ok").
+   - In .catch: setOutput("status", statusForError(err)); then set
+     process.exitCode = 1 as today.
+
+   runReviews returns void and propagates thrown errors to the .catch, so no
+   signature change is needed.
+
+   Output values: ok | quota | rate-limit | failed. quota and rate-limit are
+   exposed distinctly so a workflow can route them differently (ping #billing
+   for quota, auto-requeue for rate-limit). If matching the issue's single-kind
+   framing is preferred, collapse both to "quota" — a one-line change in
+   statusForError. Distinct is the default recommendation.
 
 b. action.yml — declare the output and give the run step an id so workflows can
    read steps.<id>.outputs.status:
 
       outputs:
         status:
-          description: "ok | quota | failed"
+          description: "ok | quota | rate-limit | failed"
           value: ${{ steps.loupe-run.outputs.status }}
 
    The final composite step needs id: loupe-run.
 
-### Step 4 — Docs (docs/github-action.md, docs/releases.md)
+### Step 5 — Docs (docs/github-action.md, docs/releases.md)
 
 - Add a "Branching on failure" section showing how to read
-  steps.loupe.outputs.status and act on "quota" (e.g. ping a channel, requeue)
-  vs "failed". Note that continue-on-error: true still keeps reviews advisory
-  but the output is now visible.
+  steps.loupe.outputs.status and act on "quota" (ping a channel, requeue) vs
+  "rate-limit" (auto-requeue with backoff) vs "failed". Note that
+  continue-on-error: true still keeps reviews advisory but the output is now
+  visible.
 - Note in docs/releases.md that the advisory posture now also exposes status.
 
-### Step 5 — Tests
+### Step 6 — Tests
 
-- packages/harness/tests/quota-error.test.ts (new):
-  - isQuotaError matches "402 Payment Required", "429", "insufficient balance",
-    "quota exceeded", "rate limit exceeded"; rejects "exited 1: syntax error"
-    and a generic "whip error: boom".
+- packages/harness/tests/errors.test.ts (new):
+  - classifyHarnessError maps "402 Payment Required", "insufficient balance",
+    "quota exceeded" -> "quota"; "429", "rate limit exceeded",
+    "too many requests" -> "rate-limit"; "exited 1: syntax error",
+    "whip error: boom" -> "unknown".
+  - HarnessError carries kind + status; isNonRetryableHarnessError is true only
+    for HarnessError with kind in {quota, rate-limit}, false for kind "unknown"
+    and for bare Errors.
   - runCli/runWhipStreaming spawn real processes and are hard to unit-test
-    deterministically, so cover the classifier exhaustively and the construction
-    path via the unit-tested rejectClassified helper instead of spawning.
+    deterministically, so cover the classifier + guard exhaustively instead of
+    spawning.
 - packages/core/tests (extend or add): verify the retry is skipped for a
-  QuotaError thrown by the harness — mock the harness review to throw a
-  QuotaError once and assert run(false) is not called.
+  non-retryable HarnessError — mock the harness review to throw a
+  HarnessError(kind "quota") once and assert run(false) is not called; assert a
+  HarnessError(kind "unknown") still triggers run(false).
 - packages/action/tests (new if absent): verify setOutput writes to a temp
-  $GITHUB_OUTPUT and the main catch maps QuotaError to "quota".
+  $GITHUB_OUTPUT and statusForError maps HarnessError kinds correctly.
 
 ---
 
@@ -171,14 +236,15 @@ b. action.yml — declare the output and give the run step an id so workflows ca
 
 | File | Change |
 |---|---|
-| packages/harness/src/index.ts | Add QuotaError, isQuotaError; classify at L111/L217/L241 |
-| packages/core/src/index.ts | Guard retry at L300-306 with isQuotaError |
-| packages/action/src/main.ts | setOutput helper; write status on success + catch |
+| packages/harness/src/errors.ts | NEW: HarnessError, HarnessErrorKind, classifyHarnessError, isNonRetryableHarnessError |
+| packages/harness/src/index.ts | Import + wrap reject sites at L106/L111/L217/L235/L241 |
+| packages/core/src/index.ts | Guard retry at L300-306 with isNonRetryableHarnessError |
+| packages/action/src/main.ts | setOutput + statusForError; write status on success + catch |
 | action.yml | outputs.status + id: loupe-run on the run step |
 | docs/github-action.md | "Branching on failure" section |
 | docs/releases.md | Note the new status output |
-| packages/harness/tests/quota-error.test.ts | New classifier tests |
-| packages/core/tests/*.test.ts | Retry-skip test |
+| packages/harness/tests/errors.test.ts | New classifier + guard tests |
+| packages/core/tests/*.test.ts | Retry-skip vs retry-unknown test |
 | packages/action/tests/*.test.ts | New output mapping tests |
 
 ## Verification
@@ -192,3 +258,5 @@ b. action.yml — declare the output and give the run step an id so workflows ca
 - Tracing / structured logging of provider errors (issue #19, adjacent).
 - Alerting integrations (a workflow concern, enabled by the new output).
 - Changing the default continue-on-error: true advisory posture.
+- Backoff retry for rate-limit (the kind is in place; the retry policy is a
+  follow-up).
