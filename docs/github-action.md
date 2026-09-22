@@ -105,3 +105,33 @@ gh api -X PUT repos/context-labs/loupe/actions/permissions/access \
   so drafts are ignored and rapid pushes collapse to the latest commit.
 - **De-dup:** loupe deletes each reviewer's prior comments before re-posting, so
   re-reviews replace rather than accumulate.
+## Branching on failure
+
+The action exposes a `status` output so a workflow can detect a failed review
+even while `continue-on-error: true` keeps it advisory. Give the step an id and
+read `steps.<id>.outputs.status`:
+
+```yaml
+- id: loupe-run
+  uses: context-labs/loupe@v0
+  continue-on-error: true
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+- if: steps.loupe-run.outputs.status == 'quota'
+  run: |
+    echo "loupe hit a billing/quota limit — ping #billing"
+    # e.g. send a Slack alert or open a tracking issue
+- if: steps.loupe-run.outputs.status == 'rate-limit'
+  run: echo "loupe was throttled; consider requeuing with backoff"
+```
+
+`status` is one of `ok | quota | rate-limit | failed`:
+
+- `ok` — review completed and was posted.
+- `quota` — the provider rejected the call for a billing reason (HTTP 402,
+  insufficient balance, quota exceeded). The one-shot fallback is **not**
+  retried for this kind, so it costs one call per reviewer, not two.
+- `rate-limit` — the provider throttled the call (HTTP 429, rate limit
+  exceeded). Also not retried via the mode-switch fallback.
+- `failed` — any other failure (harness crash, transient error, etc.). The
+  agentic→one-shot fallback still runs for unclassified errors.

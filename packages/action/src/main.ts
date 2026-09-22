@@ -2,6 +2,7 @@
 import { createRootLogger, shutdownLogger } from "@loupe/logger";
 
 import { loadConfig } from "./config";
+import { setOutput, statusForError } from "./output";
 import { runReviews } from "./orchestrate";
 import { handleComment } from "./respond";
 
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
     return;
   }
   await runReviews(config, logger);
+  setOutput("status", "ok");
 }
 
 main()
@@ -26,6 +28,7 @@ main()
     logger.error("loupe failed", {
       error: err instanceof Error ? err.message : String(err),
     });
+    setOutput("status", statusForError(err));
     process.exitCode = 1;
   })
   .finally(() => shutdownLogger());

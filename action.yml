@@ -75,6 +75,10 @@ inputs:
     description: "Cap on the agentic tool loop. Overrides .loupe.json; default 10."
     required: false
     default: ""
+outputs:
+  status:
+    description: "Review outcome a workflow can branch on: ok | quota | rate-limit | failed."
+    value: ${{ steps.loupe-run.outputs.status }}
 runs:
   using: "composite"
   steps:
@@ -84,7 +88,8 @@ runs:
     - shell: bash
       working-directory: ${{ github.action_path }}
       run: bun install --frozen-lockfile
-    - shell: bash
+    - id: loupe-run
+      shell: bash
       working-directory: ${{ github.action_path }}
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
