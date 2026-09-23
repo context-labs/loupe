@@ -16,7 +16,11 @@ const COMMENT_EVENTS = new Set([
 async function main(): Promise<void> {
   const config = loadConfig();
   if (config.eventName && COMMENT_EVENTS.has(config.eventName)) {
-    await handleComment(config, logger);
+    // Chat-triggered reviews (@loupe review) run runReviews inside
+    // handleComment; return their outcomes so a chat-triggered quota/rate-limit
+    // failure surfaces as status too, closing the same silent-green gap.
+    const outcomes = await handleComment(config, logger);
+    if (outcomes) setOutput("status", statusForOutcomes(outcomes));
     return;
   }
   const outcomes = await runReviews(config, logger);
