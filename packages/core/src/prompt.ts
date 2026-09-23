@@ -422,9 +422,15 @@ export function buildFixUserPrompt(
 export function buildVerifyUserPrompt(
   findings: readonly Finding[],
   files: readonly DiffFile[],
+  opts?: { cwdSubdir?: string },
 ): string {
+  const cwdNote = opts?.cwdSubdir
+    ? `Your working directory is \`${opts.cwdSubdir}/\` inside the repository. Finding paths are repository-relative: when reading a file from this directory, remove the leading \`${opts.cwdSubdir}/\`.`
+    : "";
   const list = findings
     .map((f, i) => `#${i} [${f.severity}] ${f.path}:${f.line}\n${f.body}`)
     .join("\n\n");
-  return ["Diff:", renderDiff(files), "Findings to verify:", list].join("\n\n");
+  return [cwdNote, "Diff:", renderDiff(files), "Findings to verify:", list]
+    .filter(Boolean)
+    .join("\n\n");
 }

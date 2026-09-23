@@ -5,6 +5,7 @@ import {
   buildSystemPrompt,
   buildUserPrompt,
   buildVerifySystemPrompt,
+  buildVerifyUserPrompt,
 } from "../src/prompt";
 
 const files: DiffFile[] = [
@@ -88,6 +89,27 @@ describe("buildVerifySystemPrompt", () => {
     expect(p).toContain("repository access");
     expect(p).toContain("READ the surrounding code");
     expect(p).toContain("If the surrounding code REFUTES the claim");
+  });
+});
+
+describe("buildVerifyUserPrompt", () => {
+  const f: DiffFile[] = [
+    { path: "src/a.ts", patch: "@@ -1,1 +1,2 @@\n line\n+added" },
+  ];
+  const findings = [
+    { path: "src/a.ts", line: 2, severity: "warning" as const, body: "x" },
+  ];
+
+  it("omits the cwd note by default", () => {
+    const p = buildVerifyUserPrompt(findings, f);
+    expect(p).not.toContain("Your working directory is");
+    expect(p).toContain("#0 [warning] src/a.ts:2");
+  });
+
+  it("includes the cwd→repo path-mapping note for an agentic subdir verify", () => {
+    const p = buildVerifyUserPrompt(findings, f, { cwdSubdir: "svc" });
+    expect(p).toContain("Your working directory is `svc/`");
+    expect(p).toContain("remove the leading `svc/`");
   });
 });
 

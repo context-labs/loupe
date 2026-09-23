@@ -26,7 +26,7 @@ flowchart LR
 7. **Scope.** On an incremental run, findings anchored on a file outside the reassessed set are dropped and counted, so they cannot duplicate a prior comment that was deliberately kept.
 8. **Anchor.** GitHub only accepts inline comments on lines present in the diff. A finding on an exact diff line stays inline. One within 10 lines snaps to the nearest diff line. Anything else, or on a file not in scope, becomes an off-diff note in the summary.
 9. **Profile filter.** `quiet` keeps blockers, `chill` (default) keeps blockers and warnings, `assertive` keeps everything.
-10. **Verify.** If any inline findings survived and `verify` is on (default), one more headless call asks the same model to mark each `real: true|false`. It may reject a finding only when the diff itself contradicts it; evidence outside the diff is not grounds for rejection. Findings judged not real are dropped and counted. An error, or a verdict set that is not exactly one verdict per finding, keeps them all and marks verification `failed` or `invalid`. An `ensemble` (≥2 models) replaces this step: every model runs the review, only findings a majority agrees on stay inline, and minority findings are surfaced in a collapsed lower-confidence section.
+10. **Verify.** If any inline findings survived and `verify` is on (default), a second pass asks the same model to mark each `real: true|false`. When the review was agentic and a real checkout exists, the verify pass is agentic too — it reads the surrounding code each finding depends on (callers, early returns, schema, docs) and rejects a finding when the real code refutes it. When headless (one-shot, or agentic with no checkout), it judges from the diff alone and rejects a finding that depends on code outside the diff as speculative. Findings judged not real are dropped and counted. An error, or a verdict set that is not exactly one verdict per finding, keeps them all and marks verification `failed` or `invalid`. An `ensemble` (≥2 models) replaces this step: every model runs the review, only findings a majority agrees on stay inline, and minority findings are surfaced in a collapsed lower-confidence section.
 11. **Post.** See [GitHub objects](./github-objects.md).
 
 ## Limits
@@ -34,7 +34,7 @@ flowchart LR
 | Knob         | Default         | Effect                                                               |
 | ------------ | --------------- | -------------------------------------------------------------------- |
 | `maxTurns`   | 10              | Agentic tool-loop cap, per reviewer or top level                     |
-| headless cap | 10, fixed       | Safety net for the verify pass and the one-shot retry                |
+| headless cap | 10, fixed       | Safety net for the one-shot retry and a headless verify pass         |
 | `reasoning`  | harness default | Native effort setting on the harness plus one sentence in the prompt |
 
 Hitting `maxTurns` mid-exploration is an error from the harness, which triggers the headless retry.

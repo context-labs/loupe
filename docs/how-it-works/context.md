@@ -23,7 +23,7 @@ Order matters for caching. Everything here is identical across PRs for a given r
 4. **Conventions.** Every convention doc that exists at the PR head, concatenated under `# <path>` headers. Fetched via the GitHub API, not the checkout.
 5. **Reasoning note.** One sentence, only when `reasoning` is configured. The same value goes to the harness natively.
 6. **Profile directive.** Which severities to report.
-7. **Tool directive.** Agentic: you have the checkout, read hunks from the diff file on demand, spend the turn budget on callers and contracts first, use subagents only for genuinely parallel work, then stop and emit JSON. Headless (verify pass, retry, chat): no tools, diff is inline.
+7. **Tool directive.** Agentic: you have the checkout, read hunks from the diff file on demand, spend the turn budget on callers and contracts first, use subagents only for genuinely parallel work, then stop and emit JSON. Headless (retry, chat): no tools, diff is inline. The verify pass uses the agentic directive when the review was agentic and a checkout exists, else the headless directive.
 8. **Output contract.** One JSON object, not wrapped in a code fence: `summary`, `concerns[]`, `highlights[]`, optional `diagram`, `findings[]` with `path`, `line` (new-file line, must be in the diff), `severity`, `body`. `summary`, `detail`, and `body` are GitHub Markdown and may hold paragraphs and fenced code blocks.
 
 ## User message

@@ -567,6 +567,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
         harnessCwd,
         agentic,
         hasCheckout,
+        subdir && harnessCwd === scoped ? subdir : undefined,
       );
       verify = v.status;
       verifyDropped = inline.length - v.kept.length;
@@ -674,12 +675,15 @@ async function verifyInline(
   harnessCwd: string,
   agentic: boolean,
   hasCheckout: boolean,
+  cwdSubdir?: string,
 ): Promise<{ kept: Finding[]; status: ReviewDiagnostics["verify"] }> {
   const verifyAgentic = agentic && hasCheckout;
   try {
     const stdout = await req.harness.review({
       systemPrompt: buildVerifySystemPrompt({ agentic: verifyAgentic }),
-      userPrompt: buildVerifyUserPrompt(findings, files),
+      userPrompt: buildVerifyUserPrompt(findings, files, {
+        cwdSubdir: verifyAgentic ? cwdSubdir : undefined,
+      }),
       model: req.model,
       agentic: verifyAgentic,
       workdir: harnessCwd,
