@@ -141,3 +141,21 @@ describe("CombinedSummaryPublicationError status recovery", () => {
     expect(statusForOutcomes(err.outcomes)).toBe("quota");
   });
 });
+
+describe("statusForOutcomes with a failed summary post", () => {
+  it("is 'failed' when every reviewer succeeded but the summary failed to post", () => {
+    expect(statusForOutcomes([ok("a"), ok("b")], true)).toBe("failed");
+  });
+
+  it("is 'quota' when a reviewer hit quota even though the summary post failed", () => {
+    expect(statusForOutcomes([ok("a"), fail("b", "402", "quota")], true)).toBe(
+      "quota",
+    );
+  });
+
+  it("is 'rate-limit' when a reviewer hit rate-limit even though the summary post failed", () => {
+    expect(statusForOutcomes([fail("a", "429", "rate-limit")], true)).toBe(
+      "rate-limit",
+    );
+  });
+});

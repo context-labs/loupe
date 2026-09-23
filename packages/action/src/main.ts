@@ -36,10 +36,13 @@ main()
     // The reviewers may have finished before the summary post threw; if so,
     // surface the run's real status from those outcomes rather than a blanket
     // "failed", which would hide a quota/rate-limit failure this change targets.
+    // summaryFailed=true means all-ok reviewers still report "failed" (the
+    // summary never posted, so the run did not complete) unless a reviewer hit a
+    // more actionable kind (quota/rate-limit) that outranks it.
     setOutput(
       "status",
       err instanceof CombinedSummaryPublicationError
-        ? statusForOutcomes(err.outcomes)
+        ? statusForOutcomes(err.outcomes, true)
         : statusForError(err),
     );
     process.exitCode = 1;

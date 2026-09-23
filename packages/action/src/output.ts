@@ -28,14 +28,19 @@ export function statusForError(err: unknown): string {
 
 /**
  * Derive the overall `status` from the per-reviewer outcomes. If every reviewer
- * succeeded, the run is `ok`. Otherwise the status reflects the most actionable
- * failure kind across the reviewers (quota > rate-limit > failed), so a workflow
- * branches on the worst thing that happened rather than needing to inspect each.
+ * succeeded and the summary posted, the run is `ok`. Otherwise the status
+ * reflects the most actionable failure kind across the reviewers
+ * (quota > rate-limit > failed), so a workflow branches on the worst thing that
+ * happened rather than needing to inspect each. `summaryFailed` covers a
+ * combined-summary publication failure: even when every reviewer succeeded, a
+ * failed post means the run did not complete, so it is `failed` unless a
+ * reviewer hit a more actionable kind (quota/rate-limit) that outranks it.
  */
 export function statusForOutcomes(
   outcomes: readonly ReviewerOutcome[],
+  summaryFailed = false,
 ): string {
-  if (outcomes.every((o) => o.ok)) return "ok";
+  if (outcomes.every((o) => o.ok) && !summaryFailed) return "ok";
   let worst: HarnessErrorKind | undefined;
   for (const o of outcomes) {
     if (o.ok) continue;

@@ -281,12 +281,6 @@ export async function handleComment(
       const reason = err instanceof Error ? err.message : String(err);
       logger.error("Chat command failed: review", { error: reason });
       process.exitCode = 1;
-      // The reviewers may have already finished (e.g. a quota failure was
-      // captured as an outcome) before the summary post threw; recover those
-      // outcomes so main() can still surface status for the run.
-      if (err instanceof CombinedSummaryPublicationError) {
-        outcomes = err.outcomes;
-      }
       await updateIssueComment(
         octokit,
         ref,
@@ -295,6 +289,12 @@ export async function handleComment(
           ? `⚠️ Re-review finished, but Loupe could not publish the combined summary — ${reason.slice(0, 500)}\n\nSee the Actions run logs for details.`
           : `⚠️ Loupe could not complete the re-review — ${reason.slice(0, 500)}\n\nSee the Actions run logs for details.`,
       );
+      // Re-throw so main()'s .catch writes status (failed, or the recovered
+      // reviewer kind for a quota/rate-limit failure whose summary post threw).
+      // Without this, a chat review that fails to start leaves status empty —
+      // the same silent-green gap this PR targets, since exitCode=1 is masked
+      // by the default continue-on-error: true.
+      throw err;
     }
     return outcomes;
   }
