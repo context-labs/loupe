@@ -109,9 +109,14 @@ Two scopes:
 
 ## Signal-to-noise features
 
-- **Verification pass** (on by default) — after findings are produced, a cheap
-  second inference judges each one real or not against the diff; rejected
-  findings are dropped. Turn off with `verify: false` / `--no-verify`.
+- **Verification pass** (on by default) — after findings are produced, a second
+  inference judges each one real or not; rejected findings are dropped. When the
+  review is agentic and a checkout exists, the verifier runs agentic too — it
+  reads the surrounding code to confirm or refute each finding (e.g. whether an
+  early return makes a crash unreachable, whether a caller nulls a value), so
+  outside-diff claims are checked against the real code instead of acquitting
+  them. In one-shot mode it judges from the diff alone and rejects claims that
+  depend on code it can't see. Turn off with `verify: false` / `--no-verify`.
 - **Ensemble** — run the review across several models (`ensemble` /
   `--ensemble`); only findings a majority agree on are posted, the rest go to a
   lower-confidence section. Supersedes the verification pass. Higher precision at

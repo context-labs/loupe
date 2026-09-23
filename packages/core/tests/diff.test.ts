@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { commentableLines } from "../src/diff";
+import { buildVerifySystemPrompt } from "../src/prompt";
 import { parseReviewOutput, parseVerification } from "../src/parse";
 import { severitiesForProfile } from "../src/types";
 import { majority, mergeEnsemble } from "../src/ensemble";
@@ -106,6 +107,20 @@ describe("parseVerification", () => {
   });
   it("returns empty map on junk", () => {
     expect(parseVerification("no json").size).toBe(0);
+  });
+});
+
+describe("buildVerifySystemPrompt", () => {
+  it("headless mode rejects outside-diff claims instead of acquitting them", () => {
+    const prompt = buildVerifySystemPrompt();
+    expect(prompt).toContain("headless with NO repository access");
+    expect(prompt).toContain("speculative from the diff alone: reject it");
+  });
+  it("agentic mode instructs the verifier to read surrounding code", () => {
+    const prompt = buildVerifySystemPrompt({ agentic: true });
+    expect(prompt).toContain("repository access");
+    expect(prompt).toContain("READ the surrounding code");
+    expect(prompt).toContain("If the surrounding code REFUTES the claim");
   });
 });
 

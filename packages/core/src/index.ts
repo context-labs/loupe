@@ -244,13 +244,14 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   // it actually exists on disk; fall back to the workdir (or cwd) so a run
   // without a local checkout — the whole diff is in the prompt — still spawns.
   const scoped = subdir ? join(req.workdir, subdir) : req.workdir;
-  const harnessCwd = existsSync(scoped)
+  const hasCheckout = existsSync(scoped);
+  const harnessCwd = hasCheckout
     ? scoped
     : existsSync(req.workdir)
       ? req.workdir
       : process.cwd();
 
-  if (agentic && !existsSync(scoped)) {
+  if (agentic && !hasCheckout) {
     logger.warn(
       "Agentic review has no matching checkout on disk; the agent can't inspect real files. Pass --workdir pointing at a checkout, or set agentic: false.",
       { scoped, fallbackCwd: harnessCwd },
@@ -350,9 +351,19 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     review = one.review;
     dropped = one.dropped;
     inline = one.inline;
-    // Verification pass: a cheap second opinion that drops false positives.
+    // Verification pass: a second opinion that drops false positives. When the
+    // review was agentic and a real checkout exists, verify agentic too so the
+    // verifier can read the surrounding code that refutes (or confirms) each
+    // finding — instead of acquitting outside-diff claims it can't see.
     if (req.verify !== false && inline.length > 0) {
-      inline = await verifyInline(req, files, inline, harnessCwd);
+      inline = await verifyInline(
+        req,
+        files,
+        inline,
+        harnessCwd,
+        agentic,
+        hasCheckout,
+      );
     }
   }
 
@@ -414,20 +425,25 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   return result;
 }
 
-/** Ask the harness to verify each finding against the diff; drop the ones it
- * judges not real. One-shot (never agentic). Fail-open: on any error keep all. */
+/** Ask the harness to verify each finding; drop the ones it judges not real.
+ * Agentic when the review was agentic and a real checkout exists (reads the
+ * surrounding code to confirm or refute each finding); one-shot from the diff
+ * otherwise. Fail-open: on any error keep all. */
 async function verifyInline(
   req: ReviewRequest,
   files: readonly { path: string; patch: string | undefined }[],
   findings: readonly Finding[],
   harnessCwd: string,
+  agentic: boolean,
+  hasCheckout: boolean,
 ): Promise<Finding[]> {
+  const verifyAgentic = agentic && hasCheckout;
   try {
     const stdout = await req.harness.review({
-      systemPrompt: buildVerifySystemPrompt(),
+      systemPrompt: buildVerifySystemPrompt({ agentic: verifyAgentic }),
       userPrompt: buildVerifyUserPrompt(findings, files),
       model: req.model,
-      agentic: false,
+      agentic: verifyAgentic,
       workdir: harnessCwd,
       env: req.harnessEnv,
       whipConfig: req.whipConfig,
@@ -440,11 +456,13 @@ async function verifyInline(
       before: findings.length,
       after: kept.length,
       dropped: findings.length - kept.length,
+      agentic: verifyAgentic,
     });
     return kept;
   } catch (err) {
     req.logger.warn("Verification pass failed; keeping all findings", {
       error: err instanceof Error ? err.message : String(err),
+      agentic: verifyAgentic,
     });
     return [...findings];
   }

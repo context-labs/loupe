@@ -219,14 +219,37 @@ export function buildUserPrompt(input: UserPromptInput): string {
 
 /**
  * Verification pass prompts. Given the diff and the proposed findings, ask the
- * model to judge each one real or not — a cheap second opinion that cuts false
- * positives. Always headless/one-shot.
+ * model to judge each one real or not — a second opinion that cuts false
+ * positives. Agentic when the review was agentic and a checkout exists; headless
+ * otherwise.
  */
-export function buildVerifySystemPrompt(): string {
+const HEADLESS_VERIFY_DIRECTIVE = `
+You are running headless with NO repository access. Judge each finding ONLY from
+the diff provided. A finding that depends on code outside the diff — what a
+caller does, whether a field is documented, whether a method is safe — is
+speculative from the diff alone: reject it. Also reject findings that are
+factually wrong about what the diff does, or duplicates.`.trim();
+
+const AGENTIC_VERIFY_DIRECTIVE = `
+You HAVE repository access: the full checkout is your working directory and you
+may use your tools to read files. For each finding, READ the surrounding code the
+claim depends on — the enclosing function, early returns, callers, schema
+definitions, docs — and judge the finding against what you actually find.
+
+A finding that claims something about code outside the diff MUST be checked
+against the real code. If the surrounding code REFUTES the claim, mark it
+real: false. Do NOT keep a finding merely because the supporting code is outside
+the diff — you can read it, so read it and judge. Reject findings that are
+speculative, factually wrong about what the code does, or duplicates. Keep
+findings that are real and correct.`.trim();
+
+export function buildVerifySystemPrompt(opts?: { agentic?: boolean }): string {
+  const directive = opts?.agentic
+    ? AGENTIC_VERIFY_DIRECTIVE
+    : HEADLESS_VERIFY_DIRECTIVE;
   return [
-    "You are a strict reviewer verifying another reviewer's findings against a diff.",
-    "For each finding, decide if it is a REAL, correct issue that a careful engineer would agree with, judging only from the diff provided.",
-    "Reject findings that are speculative, based on code not shown, factually wrong about what the diff does, or duplicates.",
+    "You are a strict reviewer verifying another reviewer's findings.",
+    directive,
     "Respond with ONE JSON object and nothing else:",
     '{ "verdicts": [ { "index": <finding index>, "real": true|false, "reason": "<short>" } ] }',
     "Include a verdict for every finding index.",
