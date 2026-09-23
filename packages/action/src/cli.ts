@@ -2,15 +2,28 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-import type { Profile, ReasoningEffort } from "@loupe/core";
+import type { PriorComments, Profile, ReasoningEffort } from "@loupe/core";
 import { createRootLogger, shutdownLogger } from "@loupe/logger";
 import { Command } from "commander";
 
 import { resolveProviders } from "./config";
-import { loadReviewers, loadSettings } from "./reviewers";
+import { asDirs, loadReviewers, loadSettings } from "./reviewers";
 import { formatResult, renderReview, reviewPullRequest } from "./run";
 
 const REASONING: readonly ReasoningEffort[] = ["low", "medium", "high"];
+const PRIOR_COMMENTS: readonly PriorComments[] = ["resolve", "delete", "keep"];
+
+function parsePriorComments(
+  raw: string | undefined,
+): PriorComments | undefined {
+  if (raw === undefined) return undefined;
+  if ((PRIOR_COMMENTS as readonly string[]).includes(raw)) {
+    return raw as PriorComments;
+  }
+  throw new Error(
+    `Invalid --prior-comments "${raw}". Use: ${PRIOR_COMMENTS.join(", ")}`,
+  );
+}
 
 function parseReasoning(raw: string): ReasoningEffort {
   if ((REASONING as readonly string[]).includes(raw))
@@ -72,7 +85,7 @@ program
   .option("-m, --model <name>", "model id for the harness (default kimi-k3)")
   .option(
     "-r, --reasoning <level>",
-    "reasoning effort: low|medium|high (default low)",
+    "reasoning effort: low|medium|high (default: harness default)",
   )
   .option(
     "--prompt-file <path>",
@@ -91,8 +104,8 @@ program
     "CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md",
   )
   .option(
-    "-d, --dir <subdir>",
-    "restrict review to a repo subdirectory (e.g. inference)",
+    "-d, --dir <dirs>",
+    "restrict review to repo directories, comma-separated (e.g. inference,elixir_engine)",
   )
   .option(
     "--config <path>",
@@ -123,6 +136,10 @@ program
     return n;
   })
   .option("--no-verify", "skip the second-opinion verification pass")
+  .option(
+    "--prior-comments <policy>",
+    "prior inline comments on re-review: resolve (default) | delete | keep",
+  )
   .option(
     "--full",
     "review the whole PR instead of the incremental delta",
@@ -155,6 +172,7 @@ program
         verify: boolean;
         full: boolean;
         dryRun: boolean;
+        priorComments?: string;
         infisicalEnv?: string;
         infisicalProject?: string;
       },
@@ -167,14 +185,18 @@ program
         const settings = opts.config ? loadSettings(opts.config) : {};
         const harnessName = opts.harness ?? settings.harness ?? "whip";
         const model = opts.model ?? settings.model ?? "kimi-k3";
-        const reasoning = parseReasoning(
-          opts.reasoning ?? settings.reasoning ?? "low",
+        const reasoningRaw = opts.reasoning ?? settings.reasoning;
+        const reasoning = reasoningRaw
+          ? parseReasoning(reasoningRaw)
+          : undefined;
+        const priorComments = parsePriorComments(
+          opts.priorComments ?? settings.priorComments,
         );
         const profile = parseProfile(
           opts.profile ?? settings.profile ?? "chill",
         );
         const timezone = opts.timezone ?? settings.timezone ?? "UTC";
-        const subdir = opts.dir ?? settings.dir;
+        const dirs = asDirs(opts.dir) ?? settings.dirs;
         const maxTurns = opts.maxTurns ?? settings.maxTurns;
         const ensembleModels = opts.ensemble
           ? opts.ensemble
@@ -203,7 +225,7 @@ program
             env: opts.infisicalEnv,
             projectId: opts.infisicalProject,
           }),
-          subdir,
+          dirs,
           dryRun: opts.dryRun,
           verify: opts.verify,
           full: opts.full,
@@ -211,6 +233,7 @@ program
           skills,
           timezone,
           maxTurns,
+          priorComments,
           whipConfig: settings.whip,
         };
 
@@ -225,28 +248,43 @@ program
           logger.info("Running reviewers", {
             reviewers: reviewers.map((r) => r.name),
           });
-          // Sequential: harnesses are heavy and may share rate limits.
+          // Sequential: harnesses are heavy and may share rate limits. One
+          // failed reviewer does not stop the others; the exit code reports it.
+          let failed = 0;
           for (const r of reviewers) {
-            const result = await reviewPullRequest({
-              ...base,
-              reviewerName: r.name,
-              guidance: r.guidance,
-              include: r.include,
-              exclude: r.exclude,
-              agentic: r.agentic ?? opts.agentic,
-              model: r.model ?? model,
-              reasoning: r.reasoning ? parseReasoning(r.reasoning) : reasoning,
-              profile: r.profile ?? profile,
-              verify: r.verify ?? opts.verify,
-              pathInstructions: r.pathInstructions,
-              ensembleModels: r.ensemble ?? ensembleModels,
-              skills: r.skills ?? skills,
-              maxTurns: r.maxTurns ?? maxTurns,
-              logger,
-            });
-            logger.info(`[${r.name}] ${formatResult(result)}`);
-            if (opts.dryRun) console.log(renderReview(result));
+            try {
+              const result = await reviewPullRequest({
+                ...base,
+                reviewerName: r.name,
+                guidance: r.guidance,
+                include: r.include,
+                exclude: r.exclude,
+                agentic: r.agentic ?? opts.agentic,
+                model: r.model ?? model,
+                reasoning: r.reasoning
+                  ? parseReasoning(r.reasoning)
+                  : reasoning,
+                profile: r.profile ?? profile,
+                verify: r.verify ?? opts.verify,
+                pathInstructions: r.pathInstructions,
+                ensembleModels: r.ensemble ?? ensembleModels,
+                skills: r.skills ?? skills,
+                maxTurns: r.maxTurns ?? maxTurns,
+                priorComments: r.priorComments ?? priorComments,
+                procedure: r.procedure ?? settings.procedure,
+                dirs: r.dirs ?? dirs,
+                logger,
+              });
+              logger.info(`[${r.name}] ${formatResult(result)}`);
+              if (opts.dryRun) console.log(renderReview(result));
+            } catch (err) {
+              failed++;
+              logger.error(`[${r.name}] review failed`, {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
+          if (failed > 0) process.exitCode = 1;
           return;
         }
 

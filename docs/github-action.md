@@ -60,8 +60,9 @@ jobs:
         env: { INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }} }
 ```
 
-Commands: `@loupe review` (re-review the whole PR), `@loupe fix <what>` (make the
-change and push a commit to the PR branch), `@loupe <question>` (answer grounded
+Commands: `@loupe review` (re-review the whole PR), `@loupe fix` (fix all open
+Loupe findings in one commit), `@loupe fix <what>` (make a specific change and
+push it to the PR branch), `@loupe <question>` (answer grounded
 in the diff), `@loupe help`. loupe auto-detects the comment event and switches to
 chat mode; a comment without `@loupe` is ignored.
 
@@ -72,7 +73,8 @@ and only works on same-repo branches, not forks.
 
 `harness`, `model`, `reasoning`, `profile`, `verify`, `full`, `prompt-file`,
 `config`, `reviewer`, `dir`, `convention-paths`, `credential-providers`,
-`github-token`. Each maps to a `LOUPE_*` env var (see below); config/prompt
+`ensemble`, `skills`, `timezone`, `max-turns`, `prior-comments` (default
+`resolve`), `github-token`. Each maps to a `LOUPE_*` env var (see below); config/prompt
 paths resolve against `GITHUB_WORKSPACE` (the checkout), not the action's own
 directory.
 
@@ -83,9 +85,21 @@ The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
 `LOUPE_PR_NUMBER`, `LOUPE_HARNESS`, `LOUPE_MODEL`, `LOUPE_REASONING`,
 `LOUPE_PROMPT_FILE`, `LOUPE_CONFIG`, `LOUPE_REVIEWER`, `LOUPE_DIR`,
 `LOUPE_CONVENTION_PATHS`, `LOUPE_CREDENTIAL_PROVIDERS`, `LOUPE_INFISICAL_ENV`,
-`LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`.
+`LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`,
+`LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
+`LOUPE_PRIOR_COMMENTS`.
 Comment/chat mode is auto-detected from `GITHUB_EVENT_NAME` (`issue_comment` /
 `pull_request_review_comment`), which the runner sets.
+
+## Review traces in the step summary
+
+After every reviewer finishes, loupe appends a bounded Markdown **review trace**
+to the Actions step summary (`GITHUB_STEP_SUMMARY`) — the reasoning each
+reviewer emitted (collapsed), its tool calls/results, reply text, and final
+result/error. It is automatic (the action already sets `GITHUB_STEP_SUMMARY`),
+offline (no model calls), and writes nothing into the repo. For local
+verification, set `GITHUB_STEP_SUMMARY=/tmp/loupe-summary.md`. See
+[Review traces](review-traces.md).
 
 ## Private-repo action access
 
@@ -105,3 +119,33 @@ gh api -X PUT repos/context-labs/loupe/actions/permissions/access \
   so drafts are ignored and rapid pushes collapse to the latest commit.
 - **De-dup:** loupe deletes each reviewer's prior comments before re-posting, so
   re-reviews replace rather than accumulate.
+## Branching on failure
+
+The action exposes a `status` output so a workflow can detect a failed review
+even while `continue-on-error: true` keeps it advisory. Give the step an id and
+read `steps.<id>.outputs.status`:
+
+```yaml
+- id: loupe-run
+  uses: context-labs/loupe@v0
+  continue-on-error: true
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+- if: steps.loupe-run.outputs.status == 'quota'
+  run: |
+    echo "loupe hit a billing/quota limit — ping #billing"
+    # e.g. send a Slack alert or open a tracking issue
+- if: steps.loupe-run.outputs.status == 'rate-limit'
+  run: echo "loupe was throttled; consider requeuing with backoff"
+```
+
+`status` is one of `ok | quota | rate-limit | failed`:
+
+- `ok` — review completed and was posted.
+- `quota` — the provider rejected the call for a billing reason (HTTP 402,
+  insufficient balance, quota exceeded). The one-shot fallback is **not**
+  retried for this kind, so it costs one call per reviewer, not two.
+- `rate-limit` — the provider throttled the call (HTTP 429, rate limit
+  exceeded). Also not retried via the mode-switch fallback.
+- `failed` — any other failure (harness crash, transient error, etc.). The
+  agentic→one-shot fallback still runs for unclassified errors.

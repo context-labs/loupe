@@ -32,6 +32,11 @@ picks up the new code.
   old code. This is expected; it is not a rollback hazard because the action is
   advisory (`continue-on-error`) in every consuming workflow.
 
+The advisory posture still hides the exit code, but the action exposes a `status`
+output (`ok | quota | rate-limit | failed`) a workflow can branch on — see
+"Branching on failure" in `github-action.md`. This makes a billing/quota failure
+machine-readable instead of a silently green job.
+
 If you need runs to be perfectly reproducible, pin an exact version (`@v0.10.1`)
 or a SHA instead of `@v0`.
 

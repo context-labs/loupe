@@ -46,6 +46,37 @@ export const findingSchema = z.object({
 });
 export type Finding = z.infer<typeof findingSchema>;
 
+/**
+ * A finding published as an off-diff note instead of an inline comment. `line`
+ * is absent when the model never produced a usable one; path and body are still
+ * enough to read the note.
+ */
+export type Note = Omit<Finding, "line"> & { readonly line?: number };
+
+/**
+ * A finding that failed `findingSchema` but still reads. Salvaged into the
+ * notes rather than discarded: a missing or off-scale `line` costs the inline
+ * anchor, not the finding itself. Path and body are both required — without
+ * them there is nothing to render.
+ *
+ * Severity is capped at `warning`: a finding that couldn't even produce a
+ * usable line is lower-trust than one we anchored, so it must not surface as a
+ * 🔴 blocker next to verified findings.
+ */
+export const salvagedFindingSchema = z.object({
+  path: z.string().trim().min(1),
+  line: z.coerce.number().int().positive().optional().catch(undefined),
+  severity: severitySchema.transform(
+    (s: Severity): Severity => (s === "blocker" ? "warning" : s),
+  ),
+  body: z.string().trim().min(1),
+});
+
+/** `path:line`, or just `path` for a note with no usable line. */
+export function anchorLabel(f: Note): string {
+  return f.line === undefined ? f.path : `${f.path}:${f.line}`;
+}
+
 /** A major, PR-level callout that isn't tied to a single diff line. */
 export const concernSchema = z.object({
   title: z.string(),

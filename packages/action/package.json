@@ -8,7 +8,8 @@
   "scripts": {
     "tsc": "../../node_modules/typescript-7/bin/tsc --build",
     "start": "bun run src/main.ts",
-    "cli": "bun run src/cli.ts"
+    "cli": "bun run src/cli.ts",
+    "trace:preview": "bun run src/trace-preview.ts"
   },
   "dependencies": {
     "@loupe/core": "workspace:*",
