@@ -1,6 +1,8 @@
 import { appendFileSync } from "node:fs";
 
-import { HarnessError } from "@loupe/harness";
+import { HarnessError, type HarnessErrorKind } from "@loupe/harness";
+
+import type { ReviewerOutcome } from "./orchestrate";
 
 /**
  * Write a `name=value` line to `$GITHUB_OUTPUT` so a consuming workflow can
@@ -17,12 +19,46 @@ export function setOutput(name: string, value: string): void {
  * Map a thrown error to the action's `status` output value. Quota and
  * rate-limit harness failures are surfaced distinctly so a workflow can route
  * them differently (ping #billing for quota, auto-requeue for rate-limit);
- * everything else is a generic "failed".
+ * everything else is a generic "failed". Used for setup errors that reject the
+ * whole run (per-reviewer failures are carried as outcomes, not thrown).
  */
 export function statusForError(err: unknown): string {
-  if (err instanceof HarnessError) {
-    if (err.kind === "quota") return "quota";
-    if (err.kind === "rate-limit") return "rate-limit";
+  return kindToStatus(err instanceof HarnessError ? err.kind : undefined);
+}
+
+/**
+ * Derive the overall `status` from the per-reviewer outcomes. If every reviewer
+ * succeeded, the run is `ok`. Otherwise the status reflects the most actionable
+ * failure kind across the reviewers (quota > rate-limit > failed), so a workflow
+ * branches on the worst thing that happened rather than needing to inspect each.
+ */
+export function statusForOutcomes(
+  outcomes: readonly ReviewerOutcome[],
+): string {
+  if (outcomes.every((o) => o.ok)) return "ok";
+  let worst: HarnessErrorKind | undefined;
+  for (const o of outcomes) {
+    if (o.ok) continue;
+    if (o.kind && outranks(o.kind, worst)) worst = o.kind;
   }
+  return kindToStatus(worst);
+}
+
+function kindToStatus(kind: HarnessErrorKind | undefined): string {
+  if (kind === "quota") return "quota";
+  if (kind === "rate-limit") return "rate-limit";
   return "failed";
+}
+
+const RANK: Record<HarnessErrorKind, number> = {
+  quota: 3,
+  "rate-limit": 2,
+  unknown: 1,
+};
+
+function outranks(
+  a: HarnessErrorKind,
+  b: HarnessErrorKind | undefined,
+): boolean {
+  return b == null || RANK[a] > RANK[b];
 }

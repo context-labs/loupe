@@ -9,9 +9,9 @@
 4. Runs a harness (an agent CLI) to produce findings as JSON.
 5. Validates each finding's `path:line` against the diff — off-diff findings
    degrade to summary notes so a bad line never rejects the review.
-6. Posts one review per reviewer: inline comments + a summary, with a
-   `REQUEST_CHANGES` verdict if any inline finding is a `blocker`, else
-   `COMMENT`. Never `APPROVE`.
+6. Posts inline findings in an empty-body review and creates or updates one
+   persistent summary issue comment per reviewer. Inline blockers produce a
+   `REQUEST_CHANGES` verdict; other inline reviews use `COMMENT`. Never `APPROVE`.
 
 ## Install
 
@@ -25,7 +25,7 @@ Requires [Bun](https://bun.sh) 1.3.14 and a harness CLI on `PATH` (default:
 ## Run a review locally
 
 ```bash
-# defaults: whip harness, kimi-k3, low reasoning, agentic
+# defaults: whip harness, kimi-k3, harness-default reasoning effort, agentic
 bun run packages/action/src/cli.ts review owner/repo#123
 
 # PR URL also works
@@ -49,14 +49,16 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 |---|---|---|
 | `-H, --harness <name>` | `whip` | Agent CLI: `whip`, `claude`, `codex`. |
 | `-m, --model <name>` | `kimi-k3` | Model id passed to the harness. |
-| `-r, --reasoning <level>` | `low` | `low` \| `medium` \| `high`. |
+| `-r, --reasoning <level>` | harness default | `low` \| `medium` \| `high`, passed to the harness natively. |
+| `--prior-comments <policy>` | `resolve` | Prior inline comments on re-review: `resolve` \| `delete` \| `keep`. |
+| `--max-turns <n>` | `10` | Cap on the agentic tool loop. |
 | `--no-agentic` | (agentic on) | Review one-shot from the diff, no tool use. |
 | `--profile <name>` | `chill` | Noise: `quiet` \| `chill` \| `assertive`. |
 | `--no-verify` | (verify on) | Skip the verification pass. |
 | `--timezone <tz>` | `UTC` | Timezone label for the review environment line (e.g. `PST`). |
 | `--ensemble <models>` | — | Run several models; keep findings a majority agree on. |
 | `--full` | off | Whole-PR review instead of the incremental delta. |
-| `-d, --dir <subdir>` | — | Restrict to a subdirectory (e.g. `inference`). |
+| `-d, --dir <dirs>` | — | Restrict to one or more directories, comma-separated (e.g. `inference,elixir_engine`). |
 | `--config <path>` | — | `.loupe.json` reviewer profiles; runs each match. |
 | `--reviewer <name>` | — | Run only one named reviewer from `--config`. |
 | `--prompt-file <path>` | — | Custom reviewer guidance (single-reviewer mode). |

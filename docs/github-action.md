@@ -60,8 +60,9 @@ jobs:
         env: { INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }} }
 ```
 
-Commands: `@loupe review` (re-review the whole PR), `@loupe fix <what>` (make the
-change and push a commit to the PR branch), `@loupe <question>` (answer grounded
+Commands: `@loupe review` (re-review the whole PR), `@loupe fix` (fix all open
+Loupe findings in one commit), `@loupe fix <what>` (make a specific change and
+push it to the PR branch), `@loupe <question>` (answer grounded
 in the diff), `@loupe help`. loupe auto-detects the comment event and switches to
 chat mode; a comment without `@loupe` is ignored.
 
@@ -72,7 +73,8 @@ and only works on same-repo branches, not forks.
 
 `harness`, `model`, `reasoning`, `profile`, `verify`, `full`, `prompt-file`,
 `config`, `reviewer`, `dir`, `convention-paths`, `credential-providers`,
-`github-token`. Each maps to a `LOUPE_*` env var (see below); config/prompt
+`ensemble`, `skills`, `timezone`, `max-turns`, `prior-comments` (default
+`resolve`), `github-token`. Each maps to a `LOUPE_*` env var (see below); config/prompt
 paths resolve against `GITHUB_WORKSPACE` (the checkout), not the action's own
 directory.
 
@@ -83,9 +85,21 @@ The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
 `LOUPE_PR_NUMBER`, `LOUPE_HARNESS`, `LOUPE_MODEL`, `LOUPE_REASONING`,
 `LOUPE_PROMPT_FILE`, `LOUPE_CONFIG`, `LOUPE_REVIEWER`, `LOUPE_DIR`,
 `LOUPE_CONVENTION_PATHS`, `LOUPE_CREDENTIAL_PROVIDERS`, `LOUPE_INFISICAL_ENV`,
-`LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`.
+`LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`,
+`LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
+`LOUPE_PRIOR_COMMENTS`.
 Comment/chat mode is auto-detected from `GITHUB_EVENT_NAME` (`issue_comment` /
 `pull_request_review_comment`), which the runner sets.
+
+## Review traces in the step summary
+
+After every reviewer finishes, loupe appends a bounded Markdown **review trace**
+to the Actions step summary (`GITHUB_STEP_SUMMARY`) — the reasoning each
+reviewer emitted (collapsed), its tool calls/results, reply text, and final
+result/error. It is automatic (the action already sets `GITHUB_STEP_SUMMARY`),
+offline (no model calls), and writes nothing into the repo. For local
+verification, set `GITHUB_STEP_SUMMARY=/tmp/loupe-summary.md`. See
+[Review traces](review-traces.md).
 
 ## Private-repo action access
 

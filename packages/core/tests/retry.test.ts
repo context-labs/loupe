@@ -52,13 +52,12 @@ function fakeHarness(throwOnFirst: unknown): {
 async function runReviewWith(harness: Harness): Promise<unknown> {
   const { runReview } = await import("../src/index");
   return runReview({
-    token: "t",
+    octokit: {} as never,
     ref: { owner: "o", repo: "r", pull_number: 1 },
     harness,
     workdir: ".",
     harnessEnv: {},
     conventionPaths: [],
-    reasoning: "low",
     dryRun: true, // don't post
     full: true, // skip the incremental path (getLastReviewedSha/changedFilesBetween)
     logger: stubLogger,

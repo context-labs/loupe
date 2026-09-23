@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HarnessError } from "@loupe/harness";
 
-import { setOutput, statusForError } from "../src/output";
+import type { ReviewerOutcome } from "../src/orchestrate";
+import { setOutput, statusForError, statusForOutcomes } from "../src/output";
 
 let outputDir: string;
 let outputFile: string;
@@ -65,5 +66,61 @@ describe("statusForError", () => {
 
   it("maps a non-Error value to 'failed'", () => {
     expect(statusForError("oops")).toBe("failed");
+  });
+});
+
+// Helpers for building outcomes without the full ReviewResult shape.
+const ok = (name: string): ReviewerOutcome => ({
+  name,
+  ok: true,
+  result: {} as never,
+});
+const fail = (
+  name: string,
+  error: string,
+  kind?: "quota" | "rate-limit" | "unknown",
+): ReviewerOutcome => ({ name, ok: false, error, kind });
+
+describe("statusForOutcomes", () => {
+  it("is 'ok' when every reviewer succeeded", () => {
+    expect(statusForOutcomes([ok("a"), ok("b")])).toBe("ok");
+  });
+
+  it("is 'quota' when a reviewer failed with kind 'quota'", () => {
+    expect(
+      statusForOutcomes([ok("a"), fail("b", "402 Payment Required", "quota")]),
+    ).toBe("quota");
+  });
+
+  it("is 'rate-limit' when a reviewer failed with kind 'rate-limit'", () => {
+    expect(
+      statusForOutcomes([
+        ok("a"),
+        fail("b", "429 Too Many Requests", "rate-limit"),
+      ]),
+    ).toBe("rate-limit");
+  });
+
+  it("is 'failed' when a reviewer failed with no kind", () => {
+    expect(statusForOutcomes([ok("a"), fail("b", "boom")])).toBe("failed");
+  });
+
+  it("ranks the most actionable kind across mixed failures (quota > rate-limit > failed)", () => {
+    expect(
+      statusForOutcomes([
+        fail("a", "transient", "unknown"),
+        fail("b", "429", "rate-limit"),
+        fail("c", "402", "quota"),
+      ]),
+    ).toBe("quota");
+    expect(
+      statusForOutcomes([
+        fail("a", "transient", "unknown"),
+        fail("b", "429", "rate-limit"),
+      ]),
+    ).toBe("rate-limit");
+    expect(
+      statusForOutcomes([fail("a", "boom"), fail("b", "also boom", "unknown")]),
+    ).toBe("failed");
   });
 });

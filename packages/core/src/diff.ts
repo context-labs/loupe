@@ -39,6 +39,39 @@ export function commentableLines(
   return map;
 }
 
+/** Count added / removed lines in a patch (diff `+`/`-` lines, not hunk headers). */
+function patchStats(patch: string | undefined): {
+  added: number;
+  removed: number;
+} {
+  let added = 0;
+  let removed = 0;
+  if (!patch) return { added, removed };
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
+    else if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
+  }
+  return { added, removed };
+}
+
+/**
+ * A compact tree of just the changed files with their line counts — what an
+ * AGENTIC reviewer gets instead of the full inline diff. The agent then reads
+ * each file's hunks (and the surrounding code) with its own tools, so a large
+ * PR's diff isn't re-sent in every turn's prompt.
+ */
+export function renderFileTree(files: readonly DiffFile[]): string {
+  return files
+    .map((f) => {
+      const { added, removed } = patchStats(f.patch);
+      const counts = f.patch
+        ? ` (+${added} −${removed})`
+        : " (binary/too large)";
+      return `- ${f.path}${counts}`;
+    })
+    .join("\n");
+}
+
 /** Compact text of the diff for the prompt: path headers + patches. */
 export function renderDiff(files: readonly DiffFile[]): string {
   return files

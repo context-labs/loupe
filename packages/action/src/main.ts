@@ -2,7 +2,7 @@
 import { createRootLogger, shutdownLogger } from "@loupe/logger";
 
 import { loadConfig } from "./config";
-import { setOutput, statusForError } from "./output";
+import { setOutput, statusForError, statusForOutcomes } from "./output";
 import { runReviews } from "./orchestrate";
 import { handleComment } from "./respond";
 
@@ -19,8 +19,9 @@ async function main(): Promise<void> {
     await handleComment(config, logger);
     return;
   }
-  await runReviews(config, logger);
-  setOutput("status", "ok");
+  const outcomes = await runReviews(config, logger);
+  if (outcomes.some((o) => !o.ok)) process.exitCode = 1;
+  setOutput("status", statusForOutcomes(outcomes));
 }
 
 main()

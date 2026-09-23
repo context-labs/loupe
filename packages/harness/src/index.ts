@@ -6,6 +6,8 @@ import { join } from "node:path";
 import type { Logger } from "@loupe/logger";
 
 import { HarnessError, classifyHarnessError } from "./errors";
+import type { HarnessTraceEvent } from "./trace";
+import { envSecretValues, redactSecrets } from "./trace";
 
 export {
   HarnessError,
@@ -13,6 +15,7 @@ export {
   isNonRetryableHarnessError,
   type HarnessErrorKind,
 } from "./errors";
+export * from "./trace";
 
 /**
  * A whip provider + model catalog, declared in loupe's config so the review
@@ -43,6 +46,9 @@ export type WhipConfig = {
  * directory it may read from, the resolved secrets to inject into its subprocess
  * env (e.g. ANTHROPIC_API_KEY), and a logger so subprocess output is observable.
  */
+/** Reasoning effort passed to the harness natively (whip defaultEffort, claude --effort, codex model_reasoning_effort). */
+export type ReasoningEffort = "low" | "medium" | "high";
+
 export type HarnessContext = {
   readonly systemPrompt: string;
   readonly userPrompt: string;
@@ -56,6 +62,27 @@ export type HarnessContext = {
   readonly whipConfig?: WhipConfig;
   /** Cap on the agentic tool loop; harness default (10) when unset. */
   readonly maxTurns?: number;
+  /**
+   * Native reasoning effort. Unset leaves the harness's own default in place
+   * (whip picks a model-aware default; claude/codex use their config).
+   */
+  readonly reasoning?: ReasoningEffort;
+  /** Stable prompt-cache key (e.g. repo/reviewer) so the provider reuses the
+   * cached system prefix across runs. Passed to whip as -cache-key. */
+  readonly cacheKey?: string;
+  /**
+   * Optional trace sink. When supplied, every harness event (reasoning deltas,
+   * text, tool_start/tool_end, done/error) is normalized and emitted here so a
+   * caller can observe/record the run's progress and outcome without parsing
+   * raw subprocess output. No-op when unset.
+   */
+  readonly trace?: (event: HarnessTraceEvent) => void;
+  /**
+   * Optional label for which pass or phase this context belongs to (e.g.
+   * "primary", "fallback", "ensemble:model", "verify"). Carried onto emitted
+   * trace events so downstream renderers can group them; purely informational.
+   */
+  readonly phase?: string;
   readonly logger: Logger;
 };
 
@@ -94,6 +121,18 @@ function runCli(
   ctx: HarnessContext,
 ): Promise<string> {
   const log = ctx.logger.child(cmd);
+  const secrets = envSecretValues({ ...process.env, ...ctx.env });
+  const emit = (event: HarnessTraceEvent): void =>
+    ctx.trace?.({
+      ...event,
+      ...(event.type === "done"
+        ? { text: redactSecrets(event.text, secrets) }
+        : event.type === "error"
+          ? { error: redactSecrets(event.error, secrets) }
+          : {}),
+      model: event.model ?? ctx.model,
+      phase: event.phase ?? ctx.phase,
+    });
   log.debug("Spawning harness", { args, cwd: ctx.workdir, model: ctx.model });
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
@@ -112,15 +151,21 @@ function runCli(
       stderr += chunk;
       log.debug(chunk.trimEnd());
     });
-    child.on("error", (e) =>
-      reject(new HarnessError(e instanceof Error ? e.message : String(e))),
-    );
+    child.on("error", (err) => {
+      emit({ type: "error", error: err.message });
+      reject(
+        new HarnessError(err instanceof Error ? err.message : String(err)),
+      );
+    });
     child.on("close", (code) => {
       log.debug("Harness exited", { code, stdoutChars: stdout.length });
       log.debug("Harness stdout", { stdout });
-      if (code === 0) resolve(stdout);
-      else {
+      if (code === 0) {
+        emit({ type: "done", text: stdout });
+        resolve(stdout);
+      } else {
         const message = `${cmd} exited ${code}: ${stderr.slice(0, 2000)}`;
+        emit({ type: "error", error: message });
         reject(new HarnessError(message, classifyHarnessError(message)));
       }
     });
@@ -129,24 +174,42 @@ function runCli(
   });
 }
 
+/** Argument list for `claude -p`; exported so the flag mapping is testable. */
+export function buildClaudeArgs(
+  ctx: Pick<HarnessContext, "systemPrompt" | "model" | "reasoning">,
+): string[] {
+  const args = [
+    "-p",
+    "--permission-mode",
+    "plan",
+    "--append-system-prompt",
+    ctx.systemPrompt,
+  ];
+  if (ctx.model) args.push("--model", ctx.model);
+  if (ctx.reasoning) args.push("--effort", ctx.reasoning);
+  return args;
+}
+
 /** Claude Code CLI: `claude -p` reads the user prompt from stdin. */
 export function claudeHarness(): Harness {
   return {
     name: "claude",
     credentialKeys: ["ANTHROPIC_API_KEY"],
     available: () => commandExists("claude"),
-    review: (ctx) => {
-      const args = [
-        "-p",
-        "--permission-mode",
-        "plan",
-        "--append-system-prompt",
-        ctx.systemPrompt,
-      ];
-      if (ctx.model) args.push("--model", ctx.model);
-      return runCli("claude", args, ctx.userPrompt, ctx);
-    },
+    review: (ctx) =>
+      runCli("claude", buildClaudeArgs(ctx), ctx.userPrompt, ctx),
   };
+}
+
+/** Argument list for `codex exec`; exported so the flag mapping is testable. */
+export function buildCodexArgs(
+  ctx: Pick<HarnessContext, "model" | "reasoning">,
+): string[] {
+  const args = ["exec"];
+  if (ctx.model) args.push("--model", ctx.model);
+  if (ctx.reasoning) args.push("-c", `model_reasoning_effort=${ctx.reasoning}`);
+  args.push("-");
+  return args;
 }
 
 /** OpenAI Codex CLI: `codex exec` runs a one-shot prompt from stdin. */
@@ -156,12 +219,9 @@ export function codexHarness(): Harness {
     credentialKeys: ["OPENAI_API_KEY"],
     available: () => commandExists("codex"),
     review: (ctx) => {
-      const args = ["exec"];
-      if (ctx.model) args.push("--model", ctx.model);
       // Codex has no system-prompt flag; prepend it to the piped input.
       const stdin = `${ctx.systemPrompt}\n\n---\n\n${ctx.userPrompt}`;
-      args.push("-");
-      return runCli("codex", args, stdin, ctx);
+      return runCli("codex", buildCodexArgs(ctx), stdin, ctx);
     },
   };
 }
@@ -177,6 +237,30 @@ function runWhipStreaming(
   ctx: HarnessContext,
 ): Promise<string> {
   const log = ctx.logger.child("whip");
+  // Known secrets (resolved credential values handed to the subprocess via env)
+  // are scrubbed from every trace payload downstream so an API key that happens
+  // to surface in a tool result or reasoning chunk never lands in the summary.
+  const secrets = envSecretValues({ ...process.env, ...ctx.env });
+  const scrub = (s: string | undefined): string | undefined =>
+    s === undefined ? undefined : redactSecrets(s, secrets);
+  // Scrub every string field on an event (delta/args/result/text/error).
+  const scrubEvent = (event: HarnessTraceEvent): HarnessTraceEvent =>
+    ({
+      ...event,
+      ...("delta" in event ? { delta: scrub(event.delta) } : {}),
+      ...("args" in event ? { args: scrub(event.args) } : {}),
+      ...("result" in event ? { result: scrub(event.result) } : {}),
+      ...("text" in event ? { text: scrub(event.text) } : {}),
+      ...("error" in event ? { error: scrub(event.error) } : {}),
+    }) as HarnessTraceEvent;
+  // Normalize and forward a raw NDJSON event to the optional trace sink,
+  // tagging it with the run's model/phase so renderers can label provenance.
+  const emit = (event: HarnessTraceEvent): void =>
+    ctx.trace?.({
+      ...scrubEvent(event),
+      model: event.model ?? ctx.model,
+      phase: event.phase ?? ctx.phase,
+    });
   log.debug("Spawning harness", { args, cwd: ctx.workdir, model: ctx.model });
   return new Promise((resolve, reject) => {
     const child = spawn("whip", args, {
@@ -201,6 +285,7 @@ function runWhipStreaming(
         log.debug(trimmed); // non-JSON note — surface it raw
         return;
       }
+      for (const t of whipEventToTrace(event)) emit(t);
       switch (event["type"]) {
         case "reasoning":
           if (typeof event["delta"] === "string") {
@@ -222,7 +307,13 @@ function runWhipStreaming(
           log.info("tool call", { name: event["name"], args: event["args"] });
           break;
         case "tool_end":
-          log.info("tool result", { name: event["name"] });
+          log.info("tool result", {
+            name: event["name"],
+            result:
+              typeof event["result"] === "string"
+                ? event["result"].slice(0, 300)
+                : undefined,
+          });
           break;
         case "done":
           final = typeof event["text"] === "string" ? event["text"] : text;
@@ -267,17 +358,86 @@ function runWhipStreaming(
 }
 
 /**
+ * Normalize one raw whip NDJSON event into the normalized trace events it
+ * represents. Exported so the mapping is unit-testable without spawning a whip
+ * process. Unknown event types and malformed payloads map to an empty list.
+ * Tool args/results are truncated here so a trace consumer never sees an
+ * unbounded blob.
+ */
+export function whipEventToTrace(raw: unknown): HarnessTraceEvent[] {
+  if (!raw || typeof raw !== "object") return [];
+  const event = raw as Record<string, unknown>;
+  const name =
+    typeof event["name"] === "string" ? (event["name"] as string) : "tool";
+  const serialize = (value: unknown): string | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value === "string") return value.slice(0, 2000);
+    try {
+      return JSON.stringify(value).slice(0, 2000);
+    } catch {
+      return "[unserializable tool payload]";
+    }
+  };
+  switch (event["type"]) {
+    case "reasoning":
+      return typeof event["delta"] === "string"
+        ? [{ type: "reasoning", delta: event["delta"] as string }]
+        : [];
+    case "text":
+      return typeof event["delta"] === "string"
+        ? [{ type: "text", delta: event["delta"] as string }]
+        : [];
+    case "tool_start":
+      return [
+        {
+          type: "tool_start",
+          name,
+          args: serialize(event["args"]),
+        },
+      ];
+    case "tool_end":
+      return [
+        {
+          type: "tool_end",
+          name,
+          result: serialize(event["result"]),
+        },
+      ];
+    case "done":
+      return [
+        {
+          type: "done",
+          text:
+            typeof event["text"] === "string" ? (event["text"] as string) : "",
+        },
+      ];
+    case "error":
+      return [
+        { type: "error", error: JSON.stringify(event["error"] ?? event) },
+      ];
+    default:
+      return [];
+  }
+}
+
+/**
  * Materialize a WhipConfig into a throwaway config dir and return the env
  * (WHIP_HOME) that points whip at it. Keeps loupe's `whip` block out of a
  * developer's real ~/.whip and removes the hand-written config step from CI.
  */
-export function materializeWhipHome(cfg: WhipConfig): Record<string, string> {
+export function materializeWhipHome(
+  cfg: WhipConfig,
+  reasoning?: ReasoningEffort,
+): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), "loupe-whip-"));
   const providerKey = cfg.provider.name;
   const defaultModel = cfg.defaultModel ?? cfg.models[0];
   const config = {
     defaultModel,
     defaultProvider: providerKey,
+    // An explicit effort pins whip's reasoning_effort for every request. Left
+    // out, whip picks its model-aware default.
+    ...(reasoning ? { defaultEffort: reasoning } : {}),
     providers: {
       [providerKey]: {
         name: cfg.provider.label ?? providerKey,
@@ -324,10 +484,36 @@ export function whipHarness(): Harness {
         ctx.systemPrompt,
       ];
       if (ctx.model) args.push("-m", ctx.model);
-      const whipEnv = ctx.whipConfig ? materializeWhipHome(ctx.whipConfig) : {};
-      return runWhipStreaming(args, {
-        ...ctx,
-        env: { ...ctx.env, ...whipEnv },
+      const whipEnv = ctx.whipConfig
+        ? materializeWhipHome(ctx.whipConfig, ctx.reasoning)
+        : {};
+      if (ctx.reasoning && !ctx.whipConfig) {
+        ctx.logger
+          .child("whip")
+          .warn(
+            "reasoning is set but no whip config block is materialized; whip's own default effort applies",
+          );
+      }
+      const runCtx = { ...ctx, env: { ...ctx.env, ...whipEnv } };
+      // Stable cache key → the provider reuses the cached prefix across runs.
+      // Tolerate an older whip that predates the flag: on "flag not defined:
+      // -cache-key", retry without it (caching off, but the review still runs).
+      const withKey = ctx.cacheKey
+        ? [...args, "-cache-key", ctx.cacheKey]
+        : args;
+      return runWhipStreaming(withKey, runCtx).catch((err: unknown) => {
+        if (
+          ctx.cacheKey &&
+          /flag provided but not defined: -cache-key/.test(String(err))
+        ) {
+          ctx.logger
+            .child("whip")
+            .warn(
+              "whip does not support -cache-key; retrying without it. Upgrade whip to enable prompt caching.",
+            );
+          return runWhipStreaming(args, runCtx);
+        }
+        throw err;
       });
     },
   };
