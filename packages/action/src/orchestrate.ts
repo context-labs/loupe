@@ -4,12 +4,7 @@ import {
   upsertCombinedSummary,
   type ReviewResult,
 } from "@loupe/core";
-import {
-  classifyHarnessError,
-  HarnessError,
-  isNonRetryableHarnessError,
-  type HarnessErrorKind,
-} from "@loupe/harness";
+import { HarnessError, type HarnessErrorKind } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
 
 import type { Config } from "./config";
@@ -63,10 +58,12 @@ async function runOne(
     return { name: label, ok: true, result };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    const kind =
-      err instanceof HarnessError && isNonRetryableHarnessError(err)
-        ? err.kind
-        : classifyHarnessError(reason);
+    // The harness already classified its own failures when it built the
+    // HarnessError, so carry that kind through. Don't re-classify arbitrary
+    // error strings here — an Octokit 402/429 or a config error mentioning
+    // "billing" would otherwise be misrouted to a quota/rate-limit status a
+    // workflow routes to #billing. Non-harness failures stay undefined (failed).
+    const kind = err instanceof HarnessError ? err.kind : undefined;
     logger.error(`[${label}] review failed`, { error: reason, kind });
     try {
       await postIssueComment(
