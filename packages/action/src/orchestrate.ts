@@ -18,10 +18,14 @@ import {
 
 /** What one reviewer did: its result, or the failure that was reported on the PR. */
 export class CombinedSummaryPublicationError extends Error {
-  constructor(cause: unknown) {
+  /** The reviewer outcomes from the completed run, recoverable when the
+   * combined summary failed to post so a caller can still surface status. */
+  readonly outcomes: readonly ReviewerOutcome[];
+  constructor(cause: unknown, outcomes: readonly ReviewerOutcome[]) {
     super(cause instanceof Error ? cause.message : String(cause));
     this.name = "CombinedSummaryPublicationError";
     this.cause = cause;
+    this.outcomes = outcomes;
   }
 }
 
@@ -245,7 +249,9 @@ export async function runReviews(
       renderCombinedSummary(outcomes),
     );
   } catch (err) {
-    throw new CombinedSummaryPublicationError(err);
+    // The reviewers already finished; carry their outcomes so a caller can
+    // still surface the run's status even when the summary failed to post.
+    throw new CombinedSummaryPublicationError(err, outcomes);
   }
   return outcomes;
 }

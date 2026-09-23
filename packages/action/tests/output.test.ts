@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HarnessError } from "@loupe/harness";
 
-import type { ReviewerOutcome } from "../src/orchestrate";
+import {
+  CombinedSummaryPublicationError,
+  type ReviewerOutcome,
+} from "../src/orchestrate";
 import { setOutput, statusForError, statusForOutcomes } from "../src/output";
 
 let outputDir: string;
@@ -122,5 +125,19 @@ describe("statusForOutcomes", () => {
     expect(
       statusForOutcomes([fail("a", "boom"), fail("b", "also boom", "unknown")]),
     ).toBe("failed");
+  });
+});
+
+describe("CombinedSummaryPublicationError status recovery", () => {
+  it("carries the reviewer outcomes so status survives a summary-post failure", () => {
+    const outcomes = [ok("a"), fail("b", "402 Payment Required", "quota")];
+    const err = new CombinedSummaryPublicationError(
+      new Error("summary post 500"),
+      outcomes,
+    );
+    // A caller recovers the run's real status from the carried outcomes
+    // instead of the blanket "failed" the catch would otherwise derive.
+    expect(err.outcomes).toBe(outcomes);
+    expect(statusForOutcomes(err.outcomes)).toBe("quota");
   });
 });

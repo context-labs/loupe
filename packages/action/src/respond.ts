@@ -281,6 +281,12 @@ export async function handleComment(
       const reason = err instanceof Error ? err.message : String(err);
       logger.error("Chat command failed: review", { error: reason });
       process.exitCode = 1;
+      // The reviewers may have already finished (e.g. a quota failure was
+      // captured as an outcome) before the summary post threw; recover those
+      // outcomes so main() can still surface status for the run.
+      if (err instanceof CombinedSummaryPublicationError) {
+        outcomes = err.outcomes;
+      }
       await updateIssueComment(
         octokit,
         ref,

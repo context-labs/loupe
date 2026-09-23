@@ -3,7 +3,7 @@ import { createRootLogger, shutdownLogger } from "@loupe/logger";
 
 import { loadConfig } from "./config";
 import { setOutput, statusForError, statusForOutcomes } from "./output";
-import { runReviews } from "./orchestrate";
+import { runReviews, CombinedSummaryPublicationError } from "./orchestrate";
 import { handleComment } from "./respond";
 
 const logger = createRootLogger("loupe-action");
@@ -33,7 +33,15 @@ main()
     logger.error("loupe failed", {
       error: err instanceof Error ? err.message : String(err),
     });
-    setOutput("status", statusForError(err));
+    // The reviewers may have finished before the summary post threw; if so,
+    // surface the run's real status from those outcomes rather than a blanket
+    // "failed", which would hide a quota/rate-limit failure this change targets.
+    setOutput(
+      "status",
+      err instanceof CombinedSummaryPublicationError
+        ? statusForOutcomes(err.outcomes)
+        : statusForError(err),
+    );
     process.exitCode = 1;
   })
   .finally(() => shutdownLogger());
