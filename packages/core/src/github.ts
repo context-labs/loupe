@@ -564,6 +564,8 @@ export type ReviewDiagnostics = {
   readonly profileDropped: number;
   /** Inline findings the verification pass judged not real. */
   readonly verifyDropped: number;
+  /** Inline findings suppressed as duplicates of a finding another reviewer owns. */
+  readonly crossReviewerDropped: number;
   /** Off-diff notes actually published under "Other notes". */
   readonly offDiff: number;
   /** Schema-rejected findings kept as notes instead of dropped. */
@@ -589,7 +591,7 @@ function renderDiagnostics(d: ReviewDiagnostics): string {
     }`,
     `- verification: ${d.verify}`,
     `- scope: ${d.incremental}${d.incremental === "unknown" ? " (history lookup failed; prior comments kept)" : ""}`,
-    `- dropped: ${d.malformedDropped.findings} malformed finding(s), ${d.malformedDropped.concerns} malformed concern(s), ${d.outOfScopeDropped} out of scope, ${d.profileDropped} below profile, ${d.verifyDropped} rejected by verification`,
+    `- dropped: ${d.malformedDropped.findings} malformed finding(s), ${d.malformedDropped.concerns} malformed concern(s), ${d.outOfScopeDropped} out of scope, ${d.profileDropped} below profile, ${d.verifyDropped} rejected by verification, ${d.crossReviewerDropped} duplicate of another reviewer`,
     `- off-diff notes published: ${d.offDiff}${
       d.salvagedFindings > 0
         ? ` (${d.salvagedFindings} salvaged from malformed finding(s))`

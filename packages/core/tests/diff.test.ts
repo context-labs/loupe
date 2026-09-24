@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { commentableLines } from "../src/diff";
 import { parseReviewOutput, parseVerification } from "../src/parse";
 import { severitiesForProfile } from "../src/types";
-import { majority, mergeEnsemble } from "../src/ensemble";
+import { dedupeFindings, majority, mergeEnsemble } from "../src/ensemble";
 import { validateFindings } from "../src/validate";
 
 const patch = [
@@ -243,6 +243,144 @@ describe("mergeEnsemble", () => {
     expect(majority(2)).toBe(2);
     expect(majority(3)).toBe(2);
     expect(majority(4)).toBe(3);
+  });
+});
+
+describe("dedupeFindings", () => {
+  const f = (
+    path: string,
+    line: number,
+    severity: any = "warning",
+    body = `${path}:${line}`,
+  ) => ({ path, line, severity, body });
+
+  it("suppresses a reworded duplicate raised by a second reviewer", () => {
+    // Two reviewers raise the same claim on the same file/line, worded
+    // differently — the exact pattern from the issue.
+    const a = [
+      f(
+        "svc/billing.ts",
+        42,
+        "blocker",
+        "concurrent index build will fail on duplicates",
+      ),
+    ];
+    const b = [
+      f(
+        "svc/billing.ts",
+        43,
+        "warning",
+        "the unique index on this table will error if rows already exist",
+      ),
+    ];
+    const res = dedupeFindings([
+      { reviewer: "backend-critical", findings: a },
+      { reviewer: "tests", findings: b },
+    ]);
+    const ra = res[0]!;
+    const rb = res[1]!;
+    // blocker beats warning, so backend-critical owns the survivor.
+    expect(ra.inline).toHaveLength(1);
+    expect(ra.inline[0]!.severity).toBe("blocker");
+    expect(rb.inline).toHaveLength(0);
+    expect(rb.suppressed).toBe(1);
+  });
+
+  it("keeps distinct findings on the same file untouched", () => {
+    const a = [f("x.ts", 10), f("x.ts", 200)];
+    const b = [f("x.ts", 50)];
+    const res = dedupeFindings([
+      { reviewer: "bugs", findings: a },
+      { reviewer: "sec", findings: b },
+    ]);
+    const ra = res[0]!;
+    const rb = res[1]!;
+    // No two findings are within proximity, so nothing dedupes.
+    expect(ra.inline).toHaveLength(2);
+    expect(rb.inline).toHaveLength(1);
+    expect(ra.suppressed).toBe(0);
+    expect(rb.suppressed).toBe(0);
+  });
+
+  it("attributes the survivor to the reviewer with the strongest finding", () => {
+    const a = [f("y.ts", 5, "nit")];
+    const b = [f("y.ts", 6, "blocker")];
+    const res = dedupeFindings([
+      { reviewer: "r1", findings: a },
+      { reviewer: "r2", findings: b },
+    ]);
+    const ra = res[0]!;
+    const rb = res[1]!;
+    // blocker (r2) beats nit (r1); r2 keeps it, r1 is suppressed.
+    expect(ra.inline).toHaveLength(0);
+    expect(ra.suppressed).toBe(1);
+    expect(rb.inline).toHaveLength(1);
+    expect(rb.inline[0]!.severity).toBe("blocker");
+  });
+
+  it("returns every reviewer even when one has no findings", () => {
+    const a = [f("z.ts", 1, "warning")];
+    const res = dedupeFindings([
+      { reviewer: "r1", findings: a },
+      { reviewer: "r2", findings: [] },
+      { reviewer: "r3", findings: [] },
+    ]);
+    expect(res[0]!.inline).toHaveLength(1);
+    expect(res[1]!.inline).toHaveLength(0);
+    expect(res[2]!.inline).toHaveLength(0);
+    expect(res[1]!.suppressed).toBe(0);
+  });
+
+  it("is deterministic: the strongest finding wins regardless of reviewer order", () => {
+    // r2 raises a blocker, r1 a warning on the same spot. The blocker should
+    // own the survivor no matter which reviewer is listed first.
+    const order1 = dedupeFindings([
+      { reviewer: "r1", findings: [f("w.ts", 7, "warning", "claim")] },
+      { reviewer: "r2", findings: [f("w.ts", 7, "blocker", "claim reworded")] },
+    ]);
+    const order2 = dedupeFindings([
+      { reviewer: "r2", findings: [f("w.ts", 7, "blocker", "claim reworded")] },
+      { reviewer: "r1", findings: [f("w.ts", 7, "warning", "claim")] },
+    ]);
+    // r2 (blocker) owns the survivor in both orderings.
+    expect(order1[1]!.inline).toHaveLength(1);
+    expect(order1[1]!.inline[0]!.severity).toBe("blocker");
+    expect(order1[0]!.suppressed).toBe(1);
+    expect(order2[0]!.inline).toHaveLength(1);
+    expect(order2[0]!.inline[0]!.severity).toBe("blocker");
+    expect(order2[1]!.suppressed).toBe(1);
+  });
+
+  it("does not chain: a finding beyond proximity of the anchor starts a new cluster", () => {
+    // Three reviewers on the same file. Lines 10 and 12 are within proximity
+    // of each other (anchor = 10); line 14 is 4 lines from the anchor, so it
+    // forms its own cluster instead of chaining through 12.
+    const res = dedupeFindings([
+      { reviewer: "r1", findings: [f("c.ts", 10, "warning")] },
+      { reviewer: "r2", findings: [f("c.ts", 12, "blocker")] },
+      { reviewer: "r3", findings: [f("c.ts", 14, "warning")] },
+    ]);
+    // Cluster 1 (anchor=10): r1's warning + r2's blocker → r2 owns the survivor.
+    expect(res[0]!.suppressed).toBe(1);
+    expect(res[1]!.inline).toHaveLength(1);
+    expect(res[1]!.inline[0]!.severity).toBe("blocker");
+    // Cluster 2 (anchor=14): r3 is too far to chain → kept, not suppressed.
+    expect(res[2]!.inline).toHaveLength(1);
+    expect(res[2]!.suppressed).toBe(0);
+  });
+
+  it("merges findings within proximity of the anchor into one survivor", () => {
+    // Three reviewers, all within proximity of the anchor (line 10).
+    const res = dedupeFindings([
+      { reviewer: "r1", findings: [f("c.ts", 10, "warning")] },
+      { reviewer: "r2", findings: [f("c.ts", 11, "blocker")] },
+      { reviewer: "r3", findings: [f("c.ts", 13, "warning")] },
+    ]);
+    // All within ±3 of anchor 10 → one cluster, blocker (r2) owns the survivor.
+    expect(res[0]!.suppressed).toBe(1);
+    expect(res[1]!.inline).toHaveLength(1);
+    expect(res[1]!.inline[0]!.severity).toBe("blocker");
+    expect(res[2]!.suppressed).toBe(1);
   });
 });
 

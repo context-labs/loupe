@@ -2,10 +2,17 @@ import {
   anchorLabel,
   isDegraded,
   makeOctokit,
+  produceReview,
+  publishReview,
+  reviewResultFromProduced,
   runReview,
+  type Finding,
   type PriorComments,
+  type ProducedReview,
   type Profile,
   type ReasoningEffort,
+  type ReviewDiagnostics,
+  type ReviewRequest,
   type ReviewResult,
 } from "@loupe/core";
 import {
@@ -54,17 +61,16 @@ export type RunInput = {
   readonly logger: Logger;
 };
 
-/** Resolve the harness + its credentials, then review. Shared by Action and CLI. */
-export async function reviewPullRequest(
-  input: RunInput,
-): Promise<ReviewResult> {
+/** Resolve the harness, verify it is installed, and forward its env. */
+async function resolveHarness(input: RunInput): Promise<{
+  harness: ReturnType<typeof getHarness>;
+  harnessEnv: Record<string, string>;
+}> {
   const { logger } = input;
   const harness = getHarness(input.harnessName);
-
   if (!(await harness.available())) {
     throw new Error(`Harness "${harness.name}" CLI is not installed.`);
   }
-
   // Best-effort: forward whatever credential keys the providers can supply.
   // We don't hard-fail on a missing key — harnesses often self-authenticate
   // from a local login (whip via ~/.whip, claude via its own login). If a key
@@ -80,8 +86,14 @@ export async function reviewPullRequest(
     missingKeys: missing,
     providers: input.providers.map((p) => p.name),
   });
+  return { harness, harnessEnv };
+}
 
-  return runReview({
+/** Build a ReviewRequest from a RunInput (shared by produce/publish/run). */
+async function buildRequest(input: RunInput): Promise<ReviewRequest> {
+  const { logger } = input;
+  const { harness, harnessEnv } = await resolveHarness(input);
+  return {
     octokit: makeOctokit(input.token, logger),
     ref: {
       owner: input.owner,
@@ -115,7 +127,64 @@ export async function reviewPullRequest(
     deferSummary: input.deferSummary,
     trace: input.trace,
     logger,
-  });
+  };
+}
+
+/** Resolve the harness + credentials, then review end-to-end. Shared by Action and CLI. */
+export async function reviewPullRequest(
+  input: RunInput,
+): Promise<ReviewResult> {
+  return runReview(await buildRequest(input));
+}
+
+/**
+ * Produce a review without posting it. The multi-reviewer orchestrator calls
+ * this for every reviewer, deduplicates the union of their inline findings,
+ * then posts the survivors via {@link publishReviewPullRequest}.
+ */
+export async function produceReviewPullRequest(
+  input: RunInput,
+): Promise<ProducedReview> {
+  return produceReview(await buildRequest(input));
+}
+
+/**
+ * Post a produced review as inline comments + (unless deferred) a summary. The
+ * orchestrator passes the deduped inline set and updated diagnostics so only
+ * surviving findings post. Returns the summary body (empty when deferred).
+ */
+export async function publishReviewPullRequest(
+  input: RunInput,
+  produced: ProducedReview,
+  inline: readonly Finding[],
+  diagnostics: ReviewDiagnostics,
+): Promise<string> {
+  const { logger } = input;
+  return publishReview(
+    makeOctokit(input.token, logger),
+    {
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pullNumber,
+    },
+    produced,
+    logger,
+    {
+      inline,
+      diagnostics,
+      priorComments: input.priorComments,
+      deferSummary: input.deferSummary,
+    },
+  );
+}
+
+/** Build a ReviewResult from a produced review (optionally with deduped inline). */
+export function resultFromProduced(
+  produced: ProducedReview,
+  inline: readonly Finding[] = produced.inline,
+  diagnostics: ReviewDiagnostics = produced.diagnostics,
+): ReviewResult {
+  return reviewResultFromProduced(produced, inline, diagnostics);
 }
 
 export function formatResult(result: ReviewResult): string {
@@ -143,7 +212,7 @@ export function renderReview(result: ReviewResult): string {
   const d = result.diagnostics;
   const lines = [
     `\nSummary: ${result.summary}\n`,
-    `Run: mode=${d.mode} verify=${d.verify} scope=${d.incremental} malformed=${d.malformedDropped.findings}/${d.malformedDropped.concerns} outOfScope=${d.outOfScopeDropped} profile=${d.profileDropped} verifyDropped=${d.verifyDropped}\n`,
+    `Run: mode=${d.mode} verify=${d.verify} scope=${d.incremental} malformed=${d.malformedDropped.findings}/${d.malformedDropped.concerns} outOfScope=${d.outOfScopeDropped} profile=${d.profileDropped} verifyDropped=${d.verifyDropped} crossReviewerDropped=${d.crossReviewerDropped}\n`,
   ];
   for (const f of [...result.inline, ...result.dropped]) {
     lines.push(`${SEVERITY_MARK[f.severity] ?? "•"} ${anchorLabel(f)}`);

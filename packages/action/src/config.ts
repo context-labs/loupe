@@ -59,6 +59,10 @@ const envSchema = z.object({
   LOUPE_TIMEZONE: optionalInput,
   LOUPE_MAX_TURNS: optionalInput,
   LOUPE_PRIOR_COMMENTS: optionalInput,
+  LOUPE_CROSS_REVIEWER_DEDUP: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 });
 
 function asMaxTurns(v: string | undefined): number | undefined {
@@ -125,6 +129,8 @@ export type Config = {
   readonly priorComments?: PriorComments;
   /** File value only; core defaults to true. */
   readonly procedure?: boolean;
+  /** Deduplicate the same finding across reviewers before posting (default true). */
+  readonly crossReviewerDedup: boolean;
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -177,6 +183,8 @@ export function loadConfig(): Config {
     priorComments:
       asPriorComments(env.LOUPE_PRIOR_COMMENTS) ?? file.priorComments,
     procedure: file.procedure,
+    crossReviewerDedup:
+      env.LOUPE_CROSS_REVIEWER_DEDUP ?? file.crossReviewerDedup ?? true,
     whipConfig: file.whip,
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,

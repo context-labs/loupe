@@ -178,12 +178,138 @@ const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
   outOfScopeDropped: 0,
   profileDropped: 0,
   verifyDropped: 0,
+  crossReviewerDropped: 0,
   offDiff: 0,
   salvagedFindings: 0,
 };
 
-/** End-to-end: fetch PR + conventions, run the harness, post the review. */
-export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
+/**
+ * A completed review that hasn't been posted yet — everything `postReview`
+ * needs, captured during the produce phase so a caller can deduplicate across
+ * reviewers before publishing. `empty` marks the no-op cases (no files in
+ * scope, no incremental delta) that carry nothing to post.
+ */
+export type ProducedReview = {
+  readonly reviewerName?: string;
+  readonly review: ReviewOutput;
+  readonly inline: readonly Finding[];
+  readonly uncertain: readonly Finding[];
+  readonly dropped: readonly Note[];
+  readonly diagnostics: ReviewDiagnostics;
+  /** PR head SHA to stamp in the marker. */
+  readonly headSha: string;
+  /** Prior-comment cleanup scope (paths reassessed this run). */
+  readonly refreshPaths: ReadonlySet<string>;
+  /** Full PR file list at head (for stranded-thread sweeping). */
+  readonly headPaths: ReadonlySet<string>;
+  /** Files in scope, for the stat line. */
+  readonly fileCount: number;
+  /** Nothing to post (no files in scope / no delta since last review). */
+  readonly empty?: { readonly summary: string };
+};
+
+/**
+ * Build a {@link ReviewResult} from a produced review, optionally overriding
+ * the inline findings and diagnostics (after cross-reviewer dedupe). The
+ * requested-changes verdict is recomputed from the (possibly deduped) inline
+ * set so a reviewer whose only blocker was a duplicate doesn't request changes.
+ */
+export function reviewResultFromProduced(
+  produced: ProducedReview,
+  inline: readonly Finding[] = produced.inline,
+  diagnostics: ReviewDiagnostics = produced.diagnostics,
+): ReviewResult {
+  if (produced.empty) {
+    return {
+      inlineCount: 0,
+      droppedCount: 0,
+      requestedChanges: false,
+      summary: produced.empty.summary,
+      inline: [],
+      dropped: [],
+      diagnostics,
+    };
+  }
+  const requestedChanges = [...inline, ...produced.review.concerns].some(
+    (f) => f.severity === "blocker",
+  );
+  return {
+    inlineCount: inline.length,
+    droppedCount: produced.dropped.length,
+    requestedChanges,
+    summary: produced.review.summary,
+    inline,
+    dropped: produced.dropped,
+    diagnostics,
+  };
+}
+
+/** Options for {@link publishReview} that let a caller adjust what gets posted. */
+export type PublishOptions = {
+  /** Override inline findings (e.g. after cross-reviewer dedupe). */
+  readonly inline?: readonly Finding[];
+  /** Override diagnostics (e.g. with crossReviewerDropped filled in). */
+  readonly diagnostics?: ReviewDiagnostics;
+  /** What to do with prior inline comments (default resolve). */
+  readonly priorComments?: PriorComments;
+  /** Let a higher-level orchestrator publish one summary for all reviewers. */
+  readonly deferSummary?: boolean;
+};
+
+/**
+ * Post a produced review as inline comments + (unless deferred) a summary.
+ * A caller that deduplicated across reviewers passes the deduped `inline` and
+ * updated `diagnostics` so only the surviving findings post and the run-details
+ * line reflects the suppressed duplicates.
+ */
+export async function publishReview(
+  octokit: Octokit,
+  ref: PullRef,
+  produced: ProducedReview,
+  logger: Logger,
+  opts?: PublishOptions,
+): Promise<string> {
+  const inline = opts?.inline ?? produced.inline;
+  const diagnostics = opts?.diagnostics ?? produced.diagnostics;
+  const reviewForPost = reviewForPosting(produced.review, produced.uncertain);
+  return postReview(
+    octokit,
+    ref,
+    reviewForPost,
+    inline,
+    produced.dropped,
+    logger,
+    {
+      reviewerName: produced.reviewerName,
+      headSha: produced.headSha,
+      refreshPaths: produced.refreshPaths,
+      headPaths: produced.headPaths,
+      fileCount: produced.fileCount,
+      priorComments: opts?.priorComments,
+      diagnostics,
+      deferSummary: opts?.deferSummary,
+    },
+  );
+}
+
+/** Attach the collapsed lower-confidence (ensemble minority) section to a review. */
+function reviewForPosting(
+  review: ReviewOutput,
+  uncertain: readonly Finding[],
+): ReviewOutput {
+  const uncertainNote =
+    uncertain.length > 0
+      ? `\n\n<details><summary>Lower-confidence findings (raised by a minority of models)</summary>\n\n${uncertain
+          .map((f) => `- \`${f.path}:${f.line}\` [${f.severity}] ${f.body}`)
+          .join("\n")}\n\n</details>`
+      : "";
+  return { ...review, summary: `${review.summary}${uncertainNote}` };
+}
+
+/** Run the harness and produce a review without posting it. */
+export async function produceReview(
+  req: ReviewRequest,
+): Promise<ProducedReview> {
   const { logger } = req;
   const dirs = (req.dirs ?? [])
     .map((d) => d.replace(/^\/+|\/+$/g, ""))
@@ -239,22 +365,31 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     return true;
   });
 
-  const emptyResult = (summary: string): ReviewResult => ({
-    inlineCount: 0,
-    droppedCount: 0,
-    requestedChanges: false,
-    summary,
+  const emptyDiagnostics: ReviewDiagnostics = {
+    ...CLEAN_DIAGNOSTICS,
+    mode: (req.agentic ?? true) ? "agentic" : "headless",
+  };
+
+  // Nothing to post: no files in scope, or no delta since the last review.
+  // These still return a ProducedReview so a caller can build a ReviewResult,
+  // but `empty` marks that there is nothing to publish.
+  const emptyProduced = (summary: string): ProducedReview => ({
+    reviewerName: req.reviewerName,
+    review: { summary, findings: [], concerns: [], highlights: [] },
     inline: [],
+    uncertain: [],
     dropped: [],
-    diagnostics: {
-      ...CLEAN_DIAGNOSTICS,
-      mode: (req.agentic ?? true) ? "agentic" : "headless",
-    },
+    diagnostics: emptyDiagnostics,
+    headSha: pull.headSha,
+    refreshPaths: new Set(),
+    headPaths: pull.headPaths,
+    fileCount: 0,
+    empty: { summary },
   });
 
   if (scopedFiles.length === 0) {
     logger.info("No changed files in scope; nothing to review", { dirs });
-    return emptyResult("No changed files in scope.");
+    return emptyProduced("No changed files in scope.");
   }
 
   // Incremental review: reassess only the in-scope files changed since this
@@ -312,7 +447,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
               },
             );
           }
-          return emptyResult("No in-scope changes since the last review.");
+          return emptyProduced("No in-scope changes since the last review.");
         }
       } catch (err) {
         logger.warn(
@@ -580,75 +715,82 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     outOfScopeDropped: counts.outOfScope,
     profileDropped: counts.profileDropped,
     verifyDropped,
+    crossReviewerDropped: 0,
     offDiff: dropped.length,
     salvagedFindings: counts.salvagedFindings,
   };
 
-  // Ensemble minority findings go in a collapsed lower-confidence section.
-  const uncertainNote =
-    uncertain.length > 0
-      ? `\n\n<details><summary>Lower-confidence findings (raised by a minority of models)</summary>\n\n${uncertain
-          .map((f) => `- \`${f.path}:${f.line}\` [${f.severity}] ${f.body}`)
-          .join("\n")}\n\n</details>`
-      : "";
-  const reviewForPost: ReviewOutput = {
-    ...review,
-    summary: `${review.summary}${uncertainNote}`,
-  };
-
-  const requestedChanges = [...inline, ...review.concerns].some(
-    (f) => f.severity === "blocker",
-  );
-  const verdict = requestedChanges ? "REQUEST_CHANGES" : "COMMENT";
-  const result: ReviewResult = {
-    inlineCount: inline.length,
-    droppedCount: dropped.length,
-    requestedChanges,
-    summary: review.summary,
+  const produced: ProducedReview = {
+    reviewerName: req.reviewerName,
+    review,
     inline,
+    uncertain,
     dropped,
     diagnostics,
+    headSha: pull.headSha,
+    refreshPaths,
+    headPaths: pull.headPaths,
+    fileCount: files.length,
   };
 
+  logger.info("Review produced", {
+    reviewer: req.reviewerName ?? "default",
+    inline: inline.length,
+    uncertain: uncertain.length,
+    dropped: dropped.length,
+    profile,
+    diagnostics,
+  });
+
+  return produced;
+}
+
+/**
+ * End-to-end: produce a review and post it immediately. A single-reviewer run
+ * (or the CLI) uses this; the multi-reviewer orchestrator calls
+ * {@link produceReview} for each reviewer, deduplicates the union, then posts
+ * via {@link publishReview} so the same reworded claim posts once.
+ */
+export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
+  const { logger } = req;
+  const produced = await produceReview(req);
+
+  if (produced.empty) {
+    const result = reviewResultFromProduced(produced);
+    if (req.dryRun) logger.info("Dry run — nothing to post");
+    return result;
+  }
+
+  const result = reviewResultFromProduced(produced);
   if (req.dryRun) {
     logger.info("Dry run — not posting review", {
-      verdict,
-      profile,
-      inline: inline.length,
-      uncertain: uncertain.length,
-      summary: review.summary,
-      diagnostics,
+      profile: req.profile ?? "chill",
+      inline: produced.inline.length,
+      uncertain: produced.uncertain.length,
+      summary: produced.review.summary,
+      diagnostics: produced.diagnostics,
     });
     return result;
   }
 
-  const summaryBody = await postReview(
-    octokit,
+  const summaryBody = await publishReview(
+    req.octokit,
     req.ref,
-    reviewForPost,
-    inline,
-    dropped,
-    logger,
+    produced,
+    req.logger,
     {
-      reviewerName: req.reviewerName,
-      headSha: pull.headSha,
-      refreshPaths,
-      headPaths: pull.headPaths,
-      fileCount: files.length,
       priorComments: req.priorComments,
-      diagnostics,
       deferSummary: req.deferSummary,
     },
   );
   logger.info("Posted review", {
     reviewer: req.reviewerName ?? "default",
-    inline: inline.length,
-    dropped: dropped.length,
-    verdict,
-    diagnostics,
+    inline: produced.inline.length,
+    dropped: produced.dropped.length,
+    diagnostics: produced.diagnostics,
   });
 
-  return { ...result, summaryBody, reviewedHeadSha: pull.headSha };
+  return { ...result, summaryBody, reviewedHeadSha: produced.headSha };
 }
 
 /**

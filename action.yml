@@ -79,6 +79,10 @@ inputs:
     description: "What to do with loupe's prior inline comments on a re-review: resolve (default), delete, or keep. Overrides .loupe.json."
     required: false
     default: ""
+  cross-reviewer-dedup:
+    description: "false lets the same finding post from multiple reviewers (no dedup). Default true: dedupe the union before posting. Overrides .loupe.json."
+    required: false
+    default: "true"
 outputs:
   status:
     description: "Review outcome a workflow can branch on: ok | quota | rate-limit | failed."
@@ -114,4 +118,5 @@ runs:
         LOUPE_TIMEZONE: ${{ inputs.timezone }}
         LOUPE_MAX_TURNS: ${{ inputs.max-turns }}
         LOUPE_PRIOR_COMMENTS: ${{ inputs.prior-comments }}
+        LOUPE_CROSS_REVIEWER_DEDUP: ${{ inputs.cross-reviewer-dedup }}
       run: bun run packages/action/src/main.ts
