@@ -137,6 +137,10 @@ program
   })
   .option("--no-verify", "skip the second-opinion verification pass")
   .option(
+    "--no-prompt-cache",
+    "don't send a prompt-cache key (for models that reject prompt_cache_key)",
+  )
+  .option(
     "--prior-comments <policy>",
     "prior inline comments on re-review: resolve (default) | delete | keep",
   )
@@ -170,6 +174,7 @@ program
         ensemble?: string;
         skills?: string;
         verify: boolean;
+        promptCache: boolean;
         full: boolean;
         dryRun: boolean;
         priorComments?: string;
@@ -198,6 +203,10 @@ program
         const timezone = opts.timezone ?? settings.timezone ?? "UTC";
         const dirs = asDirs(opts.dir) ?? settings.dirs;
         const maxTurns = opts.maxTurns ?? settings.maxTurns;
+        // --no-prompt-cache explicitly sets false (an override); otherwise defer
+        // to the file so a top-level .loupe.json promptCache:false still wins.
+        const promptCache =
+          opts.promptCache === false ? false : settings.promptCache;
         const ensembleModels = opts.ensemble
           ? opts.ensemble
               .split(",")
@@ -229,6 +238,7 @@ program
           dryRun: opts.dryRun,
           verify: opts.verify,
           full: opts.full,
+          promptCache,
           ensembleModels,
           skills,
           timezone,
@@ -272,6 +282,7 @@ program
                 maxTurns: r.maxTurns ?? maxTurns,
                 priorComments: r.priorComments ?? priorComments,
                 procedure: r.procedure ?? settings.procedure,
+                promptCache: r.promptCache ?? promptCache,
                 dirs: r.dirs ?? dirs,
                 logger,
               });

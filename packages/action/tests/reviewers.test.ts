@@ -48,4 +48,21 @@ describe("dir setting", () => {
     expect(asDirs("")).toBeUndefined();
     expect(asDirs(undefined)).toBeUndefined();
   });
+
+  it("loadSettings surfaces a top-level promptCache so the resolvers can honor it", () => {
+    // A repo-wide escape hatch: top-level promptCache:false must reach
+    // config.ts (env ?? file) and cli.ts (opts ?? settings) — the Action input
+    // and CLI flag default to unset, so this file value is what wins.
+    const p = config({
+      promptCache: false,
+      reviewers: [{ name: "code", prompt: "x" }],
+    });
+    expect(loadSettings(p).promptCache).toBe(false);
+    // A per-reviewer value overrides the file default too.
+    const q = config({
+      promptCache: true,
+      reviewers: [{ name: "code", prompt: "x", promptCache: false }],
+    });
+    expect(loadReviewers(q)[0]!.promptCache).toBe(false);
+  });
 });

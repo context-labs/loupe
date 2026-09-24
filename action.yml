@@ -75,6 +75,10 @@ inputs:
     description: "Cap on the agentic tool loop. Overrides .loupe.json; default 10."
     required: false
     default: ""
+  prompt-cache:
+    description: "Send a prompt-cache key for prefix caching (true/false). Set false for models whose endpoint rejects prompt_cache_key. Overrides .loupe.json; default true (empty = use .loupe.json or true)."
+    required: false
+    default: ""
   prior-comments:
     description: "What to do with loupe's prior inline comments on a re-review: resolve (default), delete, or keep. Overrides .loupe.json."
     required: false
@@ -119,4 +123,5 @@ runs:
         LOUPE_MAX_TURNS: ${{ inputs.max-turns }}
         LOUPE_PRIOR_COMMENTS: ${{ inputs.prior-comments }}
         LOUPE_CROSS_REVIEWER_DEDUP: ${{ inputs.cross-reviewer-dedup }}
+        LOUPE_PROMPT_CACHE: ${{ inputs.prompt-cache }}
       run: bun run packages/action/src/main.ts

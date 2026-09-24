@@ -145,6 +145,16 @@ export type ReviewRequest = {
   readonly priorComments?: PriorComments;
   /** Append the always-on review procedure to the system prompt (default true). */
   readonly procedure?: boolean;
+  /**
+   * Send a stable prompt-cache key to the harness so the provider reuses the
+   * cached system prefix across runs. Default true (a real cost win for models
+   * whose endpoint honors it). Set false for a reviewer whose model rejects
+   * `prompt_cache_key` as an unrecognized argument; those models cache the
+   * stable prefix automatically by prefix match, so the key adds nothing and
+   * its presence can 400. The whip harness also self-heals a cache-key 400 by
+   * retrying without the key, so this flag only skips that wasted round-trip.
+   */
+  readonly promptCache?: boolean;
   /** Post inline findings now, but let the caller aggregate the summary. */
   readonly deferSummary?: boolean;
   /**
@@ -558,8 +568,14 @@ export async function produceReview(
     : headlessUserPrompt;
 
   // Stable prompt-cache key per repo+reviewer so whip reuses the cached system
-  // prefix across runs (and its own turns within a run).
-  const cacheKey = `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}`;
+  // prefix across runs (and its own turns within a run). Omitted when a
+  // reviewer opted out of prompt caching (promptCache:false) — a model whose
+  // endpoint rejects prompt_cache_key. whip then never sends -cache-key, so no
+  // 400 and no self-heal retry. Those models cache the prefix by match anyway.
+  const cacheKey =
+    req.promptCache !== false
+      ? `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}`
+      : undefined;
 
   // Noise profile: hard-filter by severity (the prompt asks too, this enforces).
   const keep = new Set(severitiesForProfile(profile));
@@ -815,7 +831,10 @@ async function verifyInline(
       whipConfig: req.whipConfig,
       maxTurns: req.maxTurns,
       reasoning: req.reasoning,
-      cacheKey: `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`,
+      cacheKey:
+        req.promptCache !== false
+          ? `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`
+          : undefined,
       trace: req.trace,
       phase: req.model ? `verify:${req.model}` : "verify",
       logger: req.logger,

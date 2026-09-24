@@ -63,6 +63,11 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("true")
     .transform((v) => v === "true"),
+  // Unset input → undefined so a .loupe.json promptCache can win; resolves true
+  // by default in loadConfig (input → file → builtin).
+  LOUPE_PROMPT_CACHE: optionalInput.transform((v) =>
+    v === undefined ? undefined : v === "true",
+  ),
 });
 
 function asMaxTurns(v: string | undefined): number | undefined {
@@ -131,6 +136,8 @@ export type Config = {
   readonly procedure?: boolean;
   /** Deduplicate the same finding across reviewers before posting (default true). */
   readonly crossReviewerDedup: boolean;
+  /** Input → file → builtin true. false skips the prompt-cache key. */
+  readonly promptCache?: boolean;
   readonly eventName?: string;
   readonly eventPath?: string;
 };
@@ -185,6 +192,7 @@ export function loadConfig(): Config {
     procedure: file.procedure,
     crossReviewerDedup:
       env.LOUPE_CROSS_REVIEWER_DEDUP ?? file.crossReviewerDedup ?? true,
+    promptCache: env.LOUPE_PROMPT_CACHE ?? file.promptCache,
     whipConfig: file.whip,
     eventName: env.GITHUB_EVENT_NAME,
     eventPath: env.GITHUB_EVENT_PATH,

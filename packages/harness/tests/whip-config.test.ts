@@ -7,6 +7,7 @@ import {
   buildClaudeArgs,
   buildCodexArgs,
   materializeWhipHome,
+  shouldRetryWithoutCacheKey,
   type WhipConfig,
 } from "../src/index";
 
@@ -96,5 +97,40 @@ describe("native reasoning flags", () => {
       "-",
     ]);
     expect(buildCodexArgs({})).toEqual(["exec", "-"]);
+  });
+});
+
+describe("shouldRetryWithoutCacheKey", () => {
+  it("retries when the provider rejected prompt_cache_key as unrecognized", () => {
+    // The shape from issue #37: a 400 wrapped in whip's "whip error:" prefix.
+    const err = `whip error: "400 Bad Request: {"error":{"message":"Unrecognized request argument supplied: prompt_cache_key"}}"`;
+    expect(shouldRetryWithoutCacheKey(err, "loupe/acme/app/code")).toBe(true);
+  });
+
+  it("retries when an older whip predates the -cache-key flag", () => {
+    expect(
+      shouldRetryWithoutCacheKey(
+        "flag provided but not defined: -cache-key",
+        "loupe/acme/app/code",
+      ),
+    ).toBe(true);
+  });
+
+  it("matches prompt_cache_key case-insensitively", () => {
+    expect(shouldRetryWithoutCacheKey("PROMPT_CACHE_KEY bad", "k")).toBe(true);
+  });
+
+  it("does not retry an unrelated failure (a plain crash or a quota 400)", () => {
+    expect(
+      shouldRetryWithoutCacheKey("whip exited 1: boom", "loupe/acme/app/code"),
+    ).toBe(false);
+  });
+
+  it("never retries when no cache key was sent (promptCache:false opt-out)", () => {
+    // This is what guarantees the self-heal never fires for an opted-out
+    // reviewer and never double-retries.
+    expect(
+      shouldRetryWithoutCacheKey("prompt_cache_key rejected", undefined),
+    ).toBe(false);
   });
 });
