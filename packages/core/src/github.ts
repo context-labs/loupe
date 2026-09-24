@@ -62,6 +62,65 @@ export async function fetchPullContext(
   };
 }
 
+/**
+ * Why a pre-publish review was skipped. The PR can change state between the
+ * start of a run and the moment loupe is ready to post; re-reading it right
+ * before publishing catches a merge, close, or head move that happened while
+ * inference was running. See issue #39.
+ */
+export type SkipReason = "merged" | "closed" | "head-moved";
+
+/** A pre-publish freshness check result: either publishable, or why not. */
+export type PublishCheck =
+  | { readonly publishable: true }
+  | { readonly publishable: false; readonly reason: SkipReason };
+
+/**
+ * Re-read the pull request right before publishing and decide whether it is
+ * still safe to post findings onto it. The review runs for minutes and the PR
+ * can merge, close, or receive a new push in that window; posting onto a dead
+ * diff reads as the author ignoring the tool when they never had a chance.
+ *
+ * `reviewedHeadSha` is the head SHA the review was computed against (captured
+ * at the start of the run). A different current head means the findings are
+ * anchored to a commit the branch has moved past, so they are not published.
+ */
+export async function checkPublishable(
+  octokit: Octokit,
+  ref: PullRef,
+  reviewedHeadSha: string,
+): Promise<PublishCheck> {
+  const { data: pr } = await octokit.pulls.get(ref);
+  if (pr.merged) return { publishable: false, reason: "merged" };
+  if (pr.state === "closed") return { publishable: false, reason: "closed" };
+  if (pr.head.sha !== reviewedHeadSha) {
+    return { publishable: false, reason: "head-moved" };
+  }
+  return { publishable: true };
+}
+
+/**
+ * Re-read the pull request and report whether it is still open (not merged, not
+ * closed). Used to gate writes that carry findings but are not anchored to a
+ * specific head — the combined summary — where a head move is already handled
+ * per reviewer (`checkPublishable`) and the only fatal state is the PR being
+ * gone. Comparing heads here would need a run-start anchor that can race the
+ * reviewers' own fetches and falsely skip a summary whose inline comments are
+ * valid on the current head, so this check deliberately ignores the head.
+ */
+export async function checkPrOpen(
+  octokit: Octokit,
+  ref: PullRef,
+): Promise<
+  | { readonly open: true }
+  | { readonly open: false; readonly reason: "merged" | "closed" }
+> {
+  const { data: pr } = await octokit.pulls.get(ref);
+  if (pr.merged) return { open: false, reason: "merged" };
+  if (pr.state === "closed") return { open: false, reason: "closed" };
+  return { open: true };
+}
+
 /** Login the workflow token posts as when `GET /user` is unavailable to it. */
 const ACTIONS_BOT_LOGIN = "github-actions[bot]";
 const selfLogins = new WeakMap<Octokit, Promise<string>>();

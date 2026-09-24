@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { ReviewResult } from "@loupe/core";
 
 import type { ReviewerOutcome } from "../src/orchestrate";
-import { renderReviewCompletion } from "../src/respond";
+import {
+  closureMessageIfPrNotOpen,
+  renderReviewCompletion,
+} from "../src/respond";
 
 const diagnostics = {
   mode: "agentic" as const,
@@ -33,6 +36,13 @@ const clean = (name: string): OkOutcome => ({
 const outOfScope = (name: string): OkOutcome => ({
   ...clean(name),
   result: { ...clean(name).result, summary: "No changed files in scope." },
+});
+const skipped = (
+  name: string,
+  reason: "merged" | "closed" | "head-moved",
+): OkOutcome => ({
+  ...clean(name),
+  result: { ...clean(name).result, skipped: { reason } },
 });
 
 describe("renderReviewCompletion", () => {
@@ -69,5 +79,54 @@ describe("renderReviewCompletion", () => {
       "covers `inference/`, `elixir_engine/` and no changed file is under it",
     );
     expect(body).not.toContain("updated in place");
+  });
+
+  it("marks a skipped reviewer in the per-reviewer lines", () => {
+    const body = renderReviewCompletion(
+      [skipped("code", "merged"), clean("zdr")],
+      "7".repeat(40),
+      undefined,
+    );
+    expect(body).toContain("- code: ⏸️ skipped (PR merged)");
+    expect(body).toContain("- zdr: ✅ no issues");
+  });
+
+  it("notes nothing was posted when every reviewer was skipped", () => {
+    const body = renderReviewCompletion(
+      [skipped("code", "merged"), skipped("zdr", "head-moved")],
+      "7".repeat(40),
+      ["inference"],
+    );
+    expect(body).toContain("- code: ⏸️ skipped (PR merged)");
+    expect(body).toContain("- zdr: ⏸️ skipped (PR head moved)");
+    expect(body).toContain("The PR changed before loupe could publish");
+    expect(body).not.toContain("updated in place");
+  });
+});
+
+describe("closureMessageIfPrNotOpen", () => {
+  it("returns a merged closure message when the PR merged", () => {
+    expect(closureMessageIfPrNotOpen({ merged: true, state: "closed" })).toBe(
+      "⏸️ Re-review ran, but the PR merged before loupe could publish — nothing was posted.",
+    );
+  });
+
+  it("returns a closed closure message when the PR was closed but not merged", () => {
+    expect(closureMessageIfPrNotOpen({ merged: false, state: "closed" })).toBe(
+      "⏸️ Re-review ran, but the PR closed before loupe could publish — nothing was posted.",
+    );
+  });
+
+  it("returns undefined for an open PR, so the verdict summary posts", () => {
+    expect(
+      closureMessageIfPrNotOpen({ merged: false, state: "open" }),
+    ).toBeUndefined();
+  });
+
+  it("reports merged even when state is also closed", () => {
+    // GitHub sets state=closed and merged=true once merged; merged wins.
+    expect(
+      closureMessageIfPrNotOpen({ merged: true, state: "closed" }),
+    ).toContain("merged");
   });
 });

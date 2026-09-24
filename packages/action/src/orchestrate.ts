@@ -1,8 +1,10 @@
 import {
+  checkPrOpen,
   makeOctokit,
   postIssueComment,
   upsertCombinedSummary,
   type ReviewResult,
+  type SkipReason,
 } from "@loupe/core";
 import { HarnessError, type HarnessErrorKind } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
@@ -88,20 +90,24 @@ async function runOne(
   }
 }
 
-/**
- * Run the configured review(s) for a PR — either the reviewer profiles from
- * `.loupe.json`, or a single default review. Shared by the pull_request entry
- * (main) and the `@loupe review` chat command. `overrideFull` forces a whole-PR
- * review regardless of config. Reviewer failures are reported on the PR here
- * and returned as outcomes. Only setup errors (bad config) reject.
- */
-function renderCombinedSummary(outcomes: readonly ReviewerOutcome[]): string {
+/** Human phrasing for a pre-publish skip, for the combined summary and re-review comment. */
+export function skipReasonText(reason: SkipReason): string {
+  if (reason === "merged") return "merged";
+  if (reason === "closed") return "closed";
+  return "head moved";
+}
+
+export function renderCombinedSummary(
+  outcomes: readonly ReviewerOutcome[],
+): string {
   const sections = outcomes.map((outcome) => {
     const start = `<!-- loupe:section:${outcome.name}:start -->`;
     const end = `<!-- loupe:section:${outcome.name}:end -->`;
     let content: string;
     if (!outcome.ok) {
       content = `## ${outcome.name}\n\n⚠️ Reviewer failed: ${outcome.error.split("\n")[0]?.slice(0, 300)}`;
+    } else if (outcome.result.skipped) {
+      content = `## ${outcome.name}\n\n⏸️ Skipped: the PR ${skipReasonText(outcome.result.skipped.reason)} before loupe could publish. Findings were computed but not posted.`;
     } else if (!outcome.result.summaryBody) {
       content = `## ${outcome.name}\n\n_Not run: ${outcome.result.summary}_`;
     } else {
@@ -119,12 +125,24 @@ function renderCombinedSummary(outcomes: readonly ReviewerOutcome[]): string {
   ].join("\n\n---\n\n");
 }
 
+/**
+ * Run the configured review(s) for a PR — either the reviewer profiles from
+ * `.loupe.json`, or a single default review. Shared by the pull_request entry
+ * (main) and the `@loupe review` chat command. `overrideFull` forces a whole-PR
+ * review regardless of config. Reviewer failures are reported on the PR here
+ * and returned as outcomes. Only setup errors (bad config) reject.
+ */
 export async function runReviews(
   config: Config,
   logger: Logger,
   overrideFull?: boolean,
 ): Promise<ReviewerOutcome[]> {
   const full = overrideFull ?? config.full;
+  const ref = {
+    owner: config.owner,
+    repo: config.repo,
+    pull_number: config.pullNumber,
+  };
   const base = {
     token: config.token,
     owner: config.owner,
@@ -238,14 +256,30 @@ export async function runReviews(
     });
   }
 
+  // Gate the combined summary on the PR being still open (issue #39). The
+  // summary carries finding summaries and must not land on a PR that merged or
+  // closed while the reviewers were running; the prior summary (posted when the
+  // PR was open) stays in place rather than being overwritten on a dead diff.
+  // A head move is deliberately NOT checked here: head movement is already
+  // handled per reviewer (`checkPublishable` anchors on each reviewer's own
+  // fetched head), and a run-start head anchor would race the reviewers' own
+  // fetches and falsely skip a summary whose inline comments are valid on the
+  // current head. Fails open: a transient API error posts rather than dropping
+  // a completed review's summary.
+  const open = await checkPrOpen(makeOctokit(config.token, logger), ref).catch(
+    () => ({ open: true }) as const,
+  );
+  if (!open.open) {
+    logger.warn("Skipping combined summary — PR is no longer open", {
+      reason: open.reason,
+    });
+    return outcomes;
+  }
+
   try {
     await upsertCombinedSummary(
       makeOctokit(config.token, logger),
-      {
-        owner: config.owner,
-        repo: config.repo,
-        pull_number: config.pullNumber,
-      },
+      ref,
       renderCombinedSummary(outcomes),
     );
   } catch (err) {

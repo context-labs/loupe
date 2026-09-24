@@ -38,11 +38,16 @@ CLI, env vars, or `.loupe.json` — those live in `action`.
 7. **Validate** — `validateFindings` splits findings into `inline` (their
    `path:line` is in the diff) and `dropped` (off-diff → summary notes). This is
    what prevents a hallucinated line from 422-ing the whole review.
-8. **Post** — dry-run logs and returns; otherwise `postReview` deletes this
-   reviewer's prior inline comments, creates an empty-body review containing the
-   new inline findings, and creates or updates the reviewer's marker-identified
-   summary issue comment. Blockers produce `REQUEST_CHANGES`; other inline
-   reviews use `COMMENT`.
+8. **Post** — dry-run logs and returns; otherwise a pre-publish freshness check
+   re-reads the PR and skips the per-reviewer publish if it has merged, closed,
+   or had its head move since that reviewer fetched the PR (findings were computed
+   but are not posted onto a diff nobody can act on; issue #39). `postReview` then
+   deletes this reviewer's prior inline comments, creates an empty-body review
+   containing the new inline findings, and creates or updates the reviewer's
+   marker-identified summary issue comment. Blockers produce `REQUEST_CHANGES`;
+   other inline reviews use `COMMENT`. After all parallel reviewers finish, a
+   lighter check gates the combined summary against only a merge or close (a head
+   move is already handled per reviewer and needs no separate anchor).
 
 ### core files
 

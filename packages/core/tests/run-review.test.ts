@@ -59,6 +59,18 @@ type FakeGitHub = {
   threads?: string[];
   /** Makes the FIRST issue-comment listing throw (the history lookup). */
   listCommentsError?: Error;
+  /**
+   * State the PR is in by publish time, simulated by the SECOND `pulls.get`
+   * (the pre-publish freshness check). The first call — fetching context at
+   * run start — still returns the open PR at SHA_B. `"open"` keeps it
+   * publishable; `"merged"` / `"closed"` skip publishing; `"moved"` reports a
+   * head different from SHA_B so the review is anchored to a stale commit.
+   */
+  closedAs?: "merged" | "closed" | "moved" | "open";
+  /** Makes the SECOND `pulls.get` (the publish check) throw, to exercise the
+   * per-reviewer fail-open path: a transient error posts rather than dropping
+   * a completed review. */
+  failPublishCheck?: boolean;
 };
 
 function fakeOctokit(gh: FakeGitHub) {
@@ -95,15 +107,50 @@ function fakeOctokit(gh: FakeGitHub) {
       };
     },
   );
+  // The first `pulls.get` (fetchPullContext) sees the open PR; the second
+  // (the pre-publish freshness check) returns whatever closedAs is set to, so
+  // a run can simulate a merge/close/head-move that lands mid-run.
+  let pullsGetCalls = 0;
   const api = {
     graphql,
     users: {
       getAuthenticated: vi.fn(async () => ({ data: { login: "bot" } })),
     },
     pulls: {
-      get: vi.fn(async () => ({
-        data: { title: "Change A and B", body: "desc", head: { sha: SHA_B } },
-      })),
+      get: vi.fn(async () => {
+        pullsGetCalls += 1;
+        // pulls.get is called three times per non-dry run: fetchPullContext
+        // and fetchConventions run concurrently (calls 1-2, order races but
+        // both resolve before publish), then checkPublishable at publish time
+        // (call 3). Throw only on that third call so the fetches still succeed.
+        if (pullsGetCalls === 3 && gh.failPublishCheck) {
+          throw new Error("transient publish-check failure");
+        }
+        if (pullsGetCalls > 1 && gh.closedAs) {
+          // A moved head is an open PR whose head differs from the reviewed
+          // SHA; closed/merged are closed. checkPublishable checks merged,
+          // then closed, then head — so "moved" must stay open to reach that.
+          if (gh.closedAs === "moved") {
+            return {
+              data: {
+                merged: false,
+                state: "open",
+                head: { sha: "c".repeat(40) },
+              },
+            };
+          }
+          return {
+            data: {
+              merged: gh.closedAs === "merged",
+              state: gh.closedAs === "open" ? "open" : "closed",
+              head: { sha: SHA_B },
+            },
+          };
+        }
+        return {
+          data: { title: "Change A and B", body: "desc", head: { sha: SHA_B } },
+        };
+      }),
       listFiles: vi.fn(),
       listReviews: vi.fn(),
       listReviewComments: vi.fn(),
@@ -478,5 +525,110 @@ describe("runReview end to end", () => {
     expect(result.inlineCount).toBe(1);
     expect(api.calls).toEqual([]);
     expect(api.graphql).not.toHaveBeenCalled();
+  });
+
+  it("skips publishing when the PR merged before postReview, keeping the findings on the result", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "merged" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    // The review ran: the finding survived parsing and verification.
+    expect(result.inlineCount).toBe(1);
+    // But nothing was published onto the merged PR.
+    expect(api.calls).toEqual([]);
+    expect(api.pulls.createReview).not.toHaveBeenCalled();
+    expect(api.issues.createComment).not.toHaveBeenCalled();
+    expect(api.issues.updateComment).not.toHaveBeenCalled();
+    expect(api.graphql).not.toHaveBeenCalled();
+    // The skip is reported with the reason, and no head was stamped.
+    expect(result.skipped).toEqual({ reason: "merged" });
+    expect(result.summaryBody).toBeUndefined();
+    expect(result.reviewedHeadSha).toBeUndefined();
+  });
+
+  it("skips publishing when the PR was closed before postReview", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "closed" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "blocker", body: "boom" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.pulls.createReview).not.toHaveBeenCalled();
+    expect(result.skipped).toEqual({ reason: "closed" });
+  });
+
+  it("skips publishing when the head moved since the review started", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "moved" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.pulls.createReview).not.toHaveBeenCalled();
+    expect(result.skipped).toEqual({ reason: "head-moved" });
+  });
+
+  it("publishes normally when the PR is still open at postReview", async () => {
+    const api = fakeOctokit({ closedAs: "open" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.calls).toEqual(["createReview", "createComment"]);
+    expect(result.skipped).toBeUndefined();
+    expect(result.reviewedHeadSha).toBe(SHA_B);
+  });
+
+  it("dry run is unaffected by the publish gate", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "merged" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(
+      request(api, harness, checkout(), { dryRun: true }),
+    );
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.calls).toEqual([]);
+    expect(result.skipped).toBeUndefined();
+  });
+
+  it("fails open: a transient publish-check error still posts the review", async () => {
+    const api = fakeOctokit({ failPublishCheck: true });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    // The publish check threw, so the run posts anyway rather than dropping a
+    // completed review. The skip flag is not set — this is a real publish.
+    expect(result.inlineCount).toBe(1);
+    expect(api.calls).toEqual(["createReview", "createComment"]);
+    expect(result.skipped).toBeUndefined();
+    expect(result.reviewedHeadSha).toBe(SHA_B);
   });
 });

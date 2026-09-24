@@ -21,6 +21,7 @@ import picomatch from "picomatch";
 
 import {
   changedFilesBetween,
+  checkPublishable,
   cleanupStrandedThreads,
   fetchConventions,
   fetchPullContext,
@@ -29,6 +30,7 @@ import {
   type PriorComments,
   type PullRef,
   type ReviewDiagnostics,
+  type SkipReason,
 } from "./github";
 import { majority, mergeEnsemble } from "./ensemble";
 import { parseReviewOutput, parseVerification } from "./parse";
@@ -168,6 +170,13 @@ export type ReviewResult = {
   readonly summaryBody?: string;
   /** Present only when this run actually reviewed and published the PR head. */
   readonly reviewedHeadSha?: string;
+  /**
+   * Present when findings were computed but not published because the PR was no
+   * longer safe to post onto (merged, closed, or the head moved since the review
+   * started). The reviewer stays silent on GitHub rather than commenting on a
+   * dead diff. See issue #39.
+   */
+  readonly skipped?: { readonly reason: SkipReason };
 };
 
 const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
@@ -620,6 +629,34 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       diagnostics,
     });
     return result;
+  }
+
+  // The review ran for minutes; the PR can merge, close, or receive a new push
+  // in that window. Re-read it right before publishing and stay silent if it is
+  // no longer safe to post onto — findings anchored to a dead diff read as the
+  // author ignoring a tool they never had a chance to act on (issue #39). The
+  // findings stay on the result for the trace; only the GitHub writes are
+  // suppressed. The check itself failing open: a lookup error proceeds to post,
+  // since a stale-but-correct finding is better than a silent dropped review.
+  const publishable = await checkPublishable(
+    octokit,
+    req.ref,
+    pull.headSha,
+  ).catch((err: unknown) => {
+    logger.warn("Publishability check failed; posting anyway", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { publishable: true } as const;
+  });
+  if (!publishable.publishable) {
+    logger.warn("Skipping publish — PR no longer safe to post onto", {
+      reviewer: req.reviewerName ?? "default",
+      reason: publishable.reason,
+      inline: inline.length,
+      dropped: dropped.length,
+      verdict,
+    });
+    return { ...result, skipped: { reason: publishable.reason } };
   }
 
   const summaryBody = await postReview(
