@@ -42,6 +42,9 @@ const reviewerSchema = z
     priorComments: z.enum(["resolve", "delete", "keep"]).optional(),
     /** false = drop the always-on review procedure from this reviewer's prompt. */
     procedure: z.boolean().optional(),
+    /** false = don't send a prompt-cache key for this reviewer (for models whose
+     * endpoint rejects `prompt_cache_key` as an unrecognized argument). */
+    promptCache: z.boolean().optional(),
     /** Directory or directories this reviewer covers; overrides the top-level `dir`. */
     dir: z.union([z.string(), z.array(z.string())]).optional(),
   })
@@ -80,6 +83,7 @@ const configSchema = z.object({
   maxTurns: z.number().int().positive().optional(),
   priorComments: z.enum(["resolve", "delete", "keep"]).optional(),
   procedure: z.boolean().optional(),
+  promptCache: z.boolean().optional(),
   whip: whipConfigSchema.optional(),
 });
 
@@ -95,6 +99,7 @@ export type LoupeSettings = {
   readonly maxTurns?: number;
   readonly priorComments?: PriorComments;
   readonly procedure?: boolean;
+  readonly promptCache?: boolean;
   readonly whip?: z.infer<typeof whipConfigSchema>;
 };
 
@@ -112,6 +117,7 @@ export function loadSettings(configPath: string): LoupeSettings {
     maxTurns: c.maxTurns,
     priorComments: c.priorComments,
     procedure: c.procedure,
+    promptCache: c.promptCache,
     whip: c.whip,
   };
 }
@@ -132,6 +138,7 @@ export type Reviewer = {
   readonly maxTurns?: number;
   readonly priorComments?: PriorComments;
   readonly procedure?: boolean;
+  readonly promptCache?: boolean;
   readonly dirs?: readonly string[];
 };
 
@@ -177,6 +184,7 @@ export function loadReviewers(configPath: string): Reviewer[] {
     maxTurns: r.maxTurns,
     priorComments: r.priorComments,
     procedure: r.procedure,
+    promptCache: r.promptCache,
     dirs: asDirs(r.dir),
   }));
 }

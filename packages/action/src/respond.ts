@@ -198,7 +198,10 @@ async function runFix(
     whipConfig: config.whipConfig,
     maxTurns: config.maxTurns,
     reasoning: config.reasoning,
-    cacheKey: `loupe/${config.owner}/${config.repo}/fix`,
+    cacheKey:
+      config.promptCache !== false
+        ? `loupe/${config.owner}/${config.repo}/fix`
+        : undefined,
     logger,
   });
 
@@ -438,7 +441,10 @@ export async function handleComment(
       whipConfig: config.whipConfig,
       maxTurns: config.maxTurns,
       reasoning: config.reasoning,
-      cacheKey: `loupe/${config.owner}/${config.repo}/chat`,
+      cacheKey:
+        config.promptCache !== false
+          ? `loupe/${config.owner}/${config.repo}/chat`
+          : undefined,
       logger,
     });
     const answer = stdout.trim() || "I couldn't produce an answer for that.";

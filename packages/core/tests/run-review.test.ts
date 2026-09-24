@@ -498,6 +498,45 @@ describe("runReview end to end", () => {
     );
   });
 
+  it("promptCache:true (default) stamps a stable cache key on every call", async () => {
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakeHarness({ agentic: reviewJson([]) });
+    await runReview(request(api, harness, checkout()));
+    // One agentic call; the key is repo/reviewer-scoped.
+    expect(contexts.length).toBeGreaterThanOrEqual(1);
+    for (const ctx of contexts) {
+      expect(ctx.cacheKey).toBe("loupe/acme/app/code");
+    }
+  });
+
+  it("promptCache:false omits the cache key so an incompatible model isn't 400'd", async () => {
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakeHarness({ agentic: reviewJson([]) });
+    await runReview(request(api, harness, checkout(), { promptCache: false }));
+    // No call carries a cache key — whip never sends -cache-key, so a model
+    // that rejects prompt_cache_key runs instead of 400ing.
+    expect(contexts.length).toBeGreaterThanOrEqual(1);
+    for (const ctx of contexts) {
+      expect(ctx.cacheKey).toBeUndefined();
+    }
+  });
+
+  it("promptCache:false also suppresses the verify-pass cache key", async () => {
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "wrong" },
+      ]),
+      verify: verifyAll(1),
+    });
+    await runReview(request(api, harness, checkout(), { promptCache: false }));
+    // The agentic run and the verify pass both run; neither carries a key.
+    expect(contexts.length).toBe(2);
+    for (const ctx of contexts) {
+      expect(ctx.cacheKey).toBeUndefined();
+    }
+  });
+
   it("compare at GitHub's 300-file cap is treated as unknown history", async () => {
     const api = fakeOctokit({
       priorSummarySha: SHA_A,
