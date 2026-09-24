@@ -137,6 +137,10 @@ program
   })
   .option("--no-verify", "skip the second-opinion verification pass")
   .option(
+    "--no-prompt-cache",
+    "don't send a prompt-cache key (for models that reject prompt_cache_key)",
+  )
+  .option(
     "--prior-comments <policy>",
     "prior inline comments on re-review: resolve (default) | delete | keep",
   )
@@ -170,6 +174,7 @@ program
         ensemble?: string;
         skills?: string;
         verify: boolean;
+        promptCache: boolean;
         full: boolean;
         dryRun: boolean;
         priorComments?: string;
@@ -229,6 +234,7 @@ program
           dryRun: opts.dryRun,
           verify: opts.verify,
           full: opts.full,
+          promptCache: opts.promptCache,
           ensembleModels,
           skills,
           timezone,
@@ -272,6 +278,7 @@ program
                 maxTurns: r.maxTurns ?? maxTurns,
                 priorComments: r.priorComments ?? priorComments,
                 procedure: r.procedure ?? settings.procedure,
+                promptCache: r.promptCache ?? opts.promptCache,
                 dirs: r.dirs ?? dirs,
                 logger,
               });

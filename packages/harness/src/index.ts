@@ -455,6 +455,30 @@ export function materializeWhipHome(
 }
 
 /**
+ * Decide whether a whip failure is a prompt-cache-key incompatibility worth one
+ * retry without the key. Two cases, both requiring a key was actually sent:
+ *   1. an older whip that predates the `-cache-key` flag ("flag provided but
+ *      not defined: -cache-key"); and
+ *   2. a provider that accepts the flag but rejects the resulting
+ *      `prompt_cache_key` argument as unrecognized — some OpenAI-compatible
+ *      endpoints strict-validate unknown fields. Those providers cache the
+ *      stable system prefix automatically by prefix match, so dropping the key
+ *      costs nothing and unblocks the model.
+ * Exported so the retry condition is unit-testable without spawning whip.
+ */
+export function shouldRetryWithoutCacheKey(
+  err: unknown,
+  cacheKey?: string,
+): boolean {
+  if (!cacheKey) return false;
+  const msg = String(err);
+  return (
+    /flag provided but not defined: -cache-key/.test(msg) ||
+    /prompt_cache_key/i.test(msg)
+  );
+}
+
+/**
  * whip (context-labs custom harness): runs `whip run --format json` and streams
  * the event log live. `-system` sets the reviewer/output/headless instructions.
  * By default it self-authenticates from its own local login (~/.whip/); when a
@@ -502,14 +526,14 @@ export function whipHarness(): Harness {
         ? [...args, "-cache-key", ctx.cacheKey]
         : args;
       return runWhipStreaming(withKey, runCtx).catch((err: unknown) => {
-        if (
-          ctx.cacheKey &&
-          /flag provided but not defined: -cache-key/.test(String(err))
-        ) {
+        // A reviewer that opted out via promptCache:false has cacheKey
+        // undefined, so this never fires for it — no wasted retry.
+        if (shouldRetryWithoutCacheKey(err, ctx.cacheKey)) {
           ctx.logger
             .child("whip")
             .warn(
-              "whip does not support -cache-key; retrying without it. Upgrade whip to enable prompt caching.",
+              "prompt cache key rejected; retrying without it. " +
+                "Set promptCache:false to skip this retry.",
             );
           return runWhipStreaming(args, runCtx);
         }
