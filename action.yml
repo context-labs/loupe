@@ -76,9 +76,9 @@ inputs:
     required: false
     default: ""
   prompt-cache:
-    description: "Send a prompt-cache key for prefix caching (true/false). Set false for models whose endpoint rejects prompt_cache_key. Overrides .loupe.json; default true."
+    description: "Send a prompt-cache key for prefix caching (true/false). Set false for models whose endpoint rejects prompt_cache_key. Overrides .loupe.json; default true (empty = use .loupe.json or true)."
     required: false
-    default: "true"
+    default: ""
   prior-comments:
     description: "What to do with loupe's prior inline comments on a re-review: resolve (default), delete, or keep. Overrides .loupe.json."
     required: false

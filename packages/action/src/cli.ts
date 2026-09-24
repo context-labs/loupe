@@ -203,6 +203,10 @@ program
         const timezone = opts.timezone ?? settings.timezone ?? "UTC";
         const dirs = asDirs(opts.dir) ?? settings.dirs;
         const maxTurns = opts.maxTurns ?? settings.maxTurns;
+        // --no-prompt-cache explicitly sets false (an override); otherwise defer
+        // to the file so a top-level .loupe.json promptCache:false still wins.
+        const promptCache =
+          opts.promptCache === false ? false : settings.promptCache;
         const ensembleModels = opts.ensemble
           ? opts.ensemble
               .split(",")
@@ -234,7 +238,7 @@ program
           dryRun: opts.dryRun,
           verify: opts.verify,
           full: opts.full,
-          promptCache: opts.promptCache,
+          promptCache,
           ensembleModels,
           skills,
           timezone,
@@ -278,7 +282,7 @@ program
                 maxTurns: r.maxTurns ?? maxTurns,
                 priorComments: r.priorComments ?? priorComments,
                 procedure: r.procedure ?? settings.procedure,
-                promptCache: r.promptCache ?? opts.promptCache,
+                promptCache: r.promptCache ?? promptCache,
                 dirs: r.dirs ?? dirs,
                 logger,
               });
