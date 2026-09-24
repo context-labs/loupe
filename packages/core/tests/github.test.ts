@@ -756,6 +756,55 @@ describe("combined summary", () => {
     expect(body).not.toContain("_Not run:");
   });
 
+  it("preserves a skipped reviewer previous section when the skip is a freshness Skipped stub (head moved)", async () => {
+    const sha = "a".repeat(40);
+    api = octokit({
+      issueComments: [
+        {
+          id: 2,
+          body: `# Loupe
+
+---
+
+## code
+
+Previous findings
+
+---
+
+Still part of code review
+
+<!-- loupe:summary:code sha=${sha} -->
+
+---
+
+Use fix
+
+<!-- loupe:summary:combined -->`,
+          user: bot,
+        },
+      ],
+    });
+    // A head-moved freshness skip renders a Skipped stub with no SHA marker and
+    // no summaryBody. The PR is still open (head-moved != merged/closed), so the
+    // summary gate lets upsert run; this stub must be restored from the prior
+    // section rather than wiping the reviewer previous findings.
+    await upsertCombinedSummary(
+      api as never,
+      ref,
+      "# Loupe\n\n---\n\n## code\n\n⏸️ Skipped: the PR head moved before loupe could publish. Findings were computed but not posted.\n\n---\n\nUse fix",
+    );
+    const update = api.issues.updateComment.mock.calls[0] as unknown as [
+      { body: string },
+    ];
+    const body = update[0].body;
+    expect(body).toContain("Previous findings");
+    expect(body).toContain("Still part of code review");
+    expect(body).toContain("Not updated in this run");
+    expect(body).toContain(`<!-- loupe:summary:code sha=${sha} -->`);
+    expect(body).not.toContain("Skipped:");
+  });
+
   it("restores a marked skipped section inside exactly one boundary pair", async () => {
     const sha = "a".repeat(40);
     api = octokit({

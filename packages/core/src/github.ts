@@ -851,6 +851,24 @@ function priorReviewerSection(
   return marker ? section : undefined;
 }
 
+/**
+ * True for a combined-summary section body that carries no findings and should
+ * be restored from the prior summary: either the `_Not run:` stub (a reviewer
+ * with nothing to reassess) or the `Skipped:` stub (a pre-publish freshness
+ * skip - findings were computed but not posted, so the section has no SHA
+ * marker and no content worth keeping). Both would otherwise wipe the
+ * reviewer's previous findings when the combined summary is upserted, since
+ * the summary gate only blocks merged/closed PRs and a head-moved PR is still
+ * open (issue #39).
+ */
+function isNoUpdateStub(content: string): boolean {
+  const trimmed = content.trim();
+  return (
+    /^## [^\n]+\n\n_Not run: [^\n]*_$/s.test(trimmed) ||
+    /^## [^\n]+\n\n\u23F8\uFE0F Skipped: /.test(trimmed)
+  );
+}
+
 function preserveSkippedSummarySections(
   body: string,
   priorBody?: string,
@@ -862,7 +880,7 @@ function preserveSkippedSummarySections(
   const marked = body.replace(
     /<!-- loupe:section:([^\s]+):start -->\n([\s\S]*?)\n<!-- loupe:section:\1:end -->/g,
     (section, reviewer: string, content: string) => {
-      if (!/^## [^\n]+\n\n_Not run: [^\n]*_$/s.test(content.trim())) {
+      if (!isNoUpdateStub(content)) {
         return section;
       }
       const priorSection = priorReviewerSection(priorBody, reviewer);
@@ -875,7 +893,7 @@ function preserveSkippedSummarySections(
   // Backward compatibility for callers/new bodies created before section
   // boundaries were introduced.
   return marked.replace(
-    /## ([^\n]+)\n\n_Not run: [^\n]*_(?=\n\n---|$)/g,
+    /## ([^\n]+)\n\n(_Not run: [^\n]*_|\u23F8\uFE0F Skipped: [^\n]*)(?=\n\n---|$)/g,
     (stub, reviewer: string) => {
       const priorSection = priorReviewerSection(priorBody, reviewer);
       return priorSection
