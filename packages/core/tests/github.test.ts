@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  checkPrOpen,
+  checkPublishable,
   cleanupStrandedThreads,
   getLastReviewed,
   listOpenLoupeFindings,
@@ -608,6 +610,7 @@ describe("summary rendering", () => {
           verifyDropped: 0,
           offDiff: 1,
           salvagedFindings: 0,
+          degradedLegs: [],
         },
       },
     );
@@ -643,6 +646,7 @@ describe("summary rendering", () => {
           verifyDropped: 0,
           offDiff: 1,
           salvagedFindings: 1,
+          degradedLegs: [],
         },
       },
     );
@@ -752,6 +756,55 @@ describe("combined summary", () => {
     expect(body).toContain("Not updated in this run");
     expect(body).toContain(`<!-- loupe:summary:code sha=${sha} -->`);
     expect(body).not.toContain("_Not run:");
+  });
+
+  it("preserves a skipped reviewer previous section when the skip is a freshness Skipped stub (head moved)", async () => {
+    const sha = "a".repeat(40);
+    api = octokit({
+      issueComments: [
+        {
+          id: 2,
+          body: `# Loupe
+
+---
+
+## code
+
+Previous findings
+
+---
+
+Still part of code review
+
+<!-- loupe:summary:code sha=${sha} -->
+
+---
+
+Use fix
+
+<!-- loupe:summary:combined -->`,
+          user: bot,
+        },
+      ],
+    });
+    // A head-moved freshness skip renders a Skipped stub with no SHA marker and
+    // no summaryBody. The PR is still open (head-moved != merged/closed), so the
+    // summary gate lets upsert run; this stub must be restored from the prior
+    // section rather than wiping the reviewer previous findings.
+    await upsertCombinedSummary(
+      api as never,
+      ref,
+      "# Loupe\n\n---\n\n## code\n\n⏸️ Skipped: the PR head moved before loupe could publish. Findings were computed but not posted.\n\n---\n\nUse fix",
+    );
+    const update = api.issues.updateComment.mock.calls[0] as unknown as [
+      { body: string },
+    ];
+    const body = update[0].body;
+    expect(body).toContain("Previous findings");
+    expect(body).toContain("Still part of code review");
+    expect(body).toContain("Not updated in this run");
+    expect(body).toContain(`<!-- loupe:summary:code sha=${sha} -->`);
+    expect(body).not.toContain("Skipped:");
   });
 
   it("restores a marked skipped section inside exactly one boundary pair", async () => {
@@ -932,5 +985,112 @@ describe("stranded-thread cleanup", () => {
       },
     );
     expect(resolveCalls()).toEqual(["t-stranded"]);
+  });
+});
+
+/** A minimal Octokit whose only call is `pulls.get`; enough for checkPublishable. */
+function pullOctokit(pr: { merged?: boolean; state?: string; head: string }) {
+  return {
+    pulls: {
+      get: vi.fn(async () => ({ data: { ...pr, head: { sha: pr.head } } })),
+    },
+  };
+}
+
+describe("checkPublishable", () => {
+  const HEAD = "0".repeat(40);
+
+  it("is publishable for an open, unmerged PR at the reviewed head", async () => {
+    const api = pullOctokit({ state: "open", head: HEAD });
+    await expect(checkPublishable(api as never, ref, HEAD)).resolves.toEqual({
+      publishable: true,
+    });
+    expect(api.pulls.get).toHaveBeenCalledWith(ref);
+  });
+
+  it("is not publishable when the PR has merged", async () => {
+    const api = pullOctokit({ state: "closed", merged: true, head: HEAD });
+    await expect(checkPublishable(api as never, ref, HEAD)).resolves.toEqual({
+      publishable: false,
+      reason: "merged",
+    });
+  });
+
+  it("is not publishable when the PR is closed but not merged", async () => {
+    const api = pullOctokit({ state: "closed", merged: false, head: HEAD });
+    await expect(checkPublishable(api as never, ref, HEAD)).resolves.toEqual({
+      publishable: false,
+      reason: "closed",
+    });
+  });
+
+  it("is not publishable when the head has moved since the review started", async () => {
+    const api = pullOctokit({ state: "open", head: "1".repeat(40) });
+    await expect(checkPublishable(api as never, ref, HEAD)).resolves.toEqual({
+      publishable: false,
+      reason: "head-moved",
+    });
+  });
+
+  it("checks merged before head movement, so a merged PR reports merged", async () => {
+    const api = pullOctokit({
+      state: "closed",
+      merged: true,
+      head: "1".repeat(40),
+    });
+    await expect(checkPublishable(api as never, ref, HEAD)).resolves.toEqual({
+      publishable: false,
+      reason: "merged",
+    });
+  });
+});
+
+describe("checkPrOpen", () => {
+  const HEAD = "0".repeat(40);
+
+  it("is open for an unmerged, open PR (and ignores the head)", async () => {
+    const api = pullOctokit({
+      state: "open",
+      merged: false,
+      head: "1".repeat(40),
+    });
+    await expect(checkPrOpen(api as never, ref)).resolves.toEqual({
+      open: true,
+    });
+  });
+
+  it("is not open when the PR has merged", async () => {
+    const api = pullOctokit({
+      state: "closed",
+      merged: true,
+      head: HEAD,
+    });
+    await expect(checkPrOpen(api as never, ref)).resolves.toEqual({
+      open: false,
+      reason: "merged",
+    });
+  });
+
+  it("is not open when the PR was closed but not merged", async () => {
+    const api = pullOctokit({
+      state: "closed",
+      merged: false,
+      head: HEAD,
+    });
+    await expect(checkPrOpen(api as never, ref)).resolves.toEqual({
+      open: false,
+      reason: "closed",
+    });
+  });
+
+  it("does not skip on a head move: a moved-but-open PR stays open", async () => {
+    const api = pullOctokit({
+      state: "open",
+      merged: false,
+      head: "2".repeat(40),
+    });
+    await expect(checkPrOpen(api as never, ref)).resolves.toEqual({
+      open: true,
+    });
   });
 });

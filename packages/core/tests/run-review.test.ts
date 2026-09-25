@@ -15,7 +15,7 @@ import type {
 } from "@loupe/harness";
 import { describe, expect, it, vi } from "vitest";
 
-import { runReview, type ReviewRequest } from "../src/index";
+import { isDegraded, runReview, type ReviewRequest } from "../src/index";
 
 const ref = { owner: "acme", repo: "app", pull_number: 7 };
 const SHA_A = "a".repeat(40);
@@ -59,6 +59,18 @@ type FakeGitHub = {
   threads?: string[];
   /** Makes the FIRST issue-comment listing throw (the history lookup). */
   listCommentsError?: Error;
+  /**
+   * State the PR is in by publish time, simulated by the SECOND `pulls.get`
+   * (the pre-publish freshness check). The first call — fetching context at
+   * run start — still returns the open PR at SHA_B. `"open"` keeps it
+   * publishable; `"merged"` / `"closed"` skip publishing; `"moved"` reports a
+   * head different from SHA_B so the review is anchored to a stale commit.
+   */
+  closedAs?: "merged" | "closed" | "moved" | "open";
+  /** Makes the SECOND `pulls.get` (the publish check) throw, to exercise the
+   * per-reviewer fail-open path: a transient error posts rather than dropping
+   * a completed review. */
+  failPublishCheck?: boolean;
 };
 
 function fakeOctokit(gh: FakeGitHub) {
@@ -95,15 +107,50 @@ function fakeOctokit(gh: FakeGitHub) {
       };
     },
   );
+  // The first `pulls.get` (fetchPullContext) sees the open PR; the second
+  // (the pre-publish freshness check) returns whatever closedAs is set to, so
+  // a run can simulate a merge/close/head-move that lands mid-run.
+  let pullsGetCalls = 0;
   const api = {
     graphql,
     users: {
       getAuthenticated: vi.fn(async () => ({ data: { login: "bot" } })),
     },
     pulls: {
-      get: vi.fn(async () => ({
-        data: { title: "Change A and B", body: "desc", head: { sha: SHA_B } },
-      })),
+      get: vi.fn(async () => {
+        pullsGetCalls += 1;
+        // pulls.get is called three times per non-dry run: fetchPullContext
+        // and fetchConventions run concurrently (calls 1-2, order races but
+        // both resolve before publish), then checkPublishable at publish time
+        // (call 3). Throw only on that third call so the fetches still succeed.
+        if (pullsGetCalls === 3 && gh.failPublishCheck) {
+          throw new Error("transient publish-check failure");
+        }
+        if (pullsGetCalls > 1 && gh.closedAs) {
+          // A moved head is an open PR whose head differs from the reviewed
+          // SHA; closed/merged are closed. checkPublishable checks merged,
+          // then closed, then head — so "moved" must stay open to reach that.
+          if (gh.closedAs === "moved") {
+            return {
+              data: {
+                merged: false,
+                state: "open",
+                head: { sha: "c".repeat(40) },
+              },
+            };
+          }
+          return {
+            data: {
+              merged: gh.closedAs === "merged",
+              state: gh.closedAs === "open" ? "open" : "closed",
+              head: { sha: SHA_B },
+            },
+          };
+        }
+        return {
+          data: { title: "Change A and B", body: "desc", head: { sha: SHA_B } },
+        };
+      }),
       listFiles: vi.fn(),
       listReviews: vi.fn(),
       listReviewComments: vi.fn(),
@@ -219,6 +266,65 @@ function fakeHarness(script: {
   return { harness, contexts };
 }
 
+/**
+ * A harness that scripts each model independently, so an ensemble can have one
+ * leg throw and another succeed. A model whose script is an Error throws on
+ * EVERY call (agentic and the headless fallback alike) so produceOne's own
+ * agentic→one-shot retry also fails and the throw propagates to the ensemble
+ * loop — the shape of a real timeout/quota death. A string script answers that
+ * model's agentic review. The verify pass is detected by its system-prompt prefix
+ * and answered from the optional `verify` script (defaulting to "" → invalid).
+ */
+function fakePerModelHarness(
+  byModel: Record<string, string | Error>,
+  verify?: string,
+): {
+  harness: Harness;
+  contexts: HarnessContext[];
+} {
+  const contexts: HarnessContext[] = [];
+  const harness: Harness = {
+    name: "fake",
+    credentialKeys: [],
+    available: async () => true,
+    review: async (ctx) => {
+      contexts.push(ctx);
+      const verifying = ctx.systemPrompt.startsWith(
+        "You are a strict reviewer verifying",
+      );
+      if (verifying) {
+        const output = verify ?? "";
+        ctx.trace?.({
+          type: "done",
+          text: output,
+          model: ctx.model,
+          phase: ctx.phase,
+        });
+        return output;
+      }
+      const script = ctx.model ? byModel[ctx.model] : undefined;
+      if (script instanceof Error) {
+        ctx.trace?.({
+          type: "error",
+          error: script.message,
+          model: ctx.model,
+          phase: ctx.phase,
+        });
+        throw script;
+      }
+      const output = ctx.agentic ? String(script ?? reviewJson([])) : "";
+      ctx.trace?.({
+        type: "done",
+        text: output,
+        model: ctx.model,
+        phase: ctx.phase,
+      });
+      return output;
+    },
+  };
+  return { harness, contexts };
+}
+
 function request(
   api: ReturnType<typeof fakeOctokit>,
   harness: Harness,
@@ -315,6 +421,7 @@ describe("runReview end to end", () => {
       verifyDropped: 0,
       offDiff: 0,
       salvagedFindings: 0,
+      degradedLegs: [],
     });
 
     // Only B's prior thread resolved, and only after review + summary posted.
@@ -431,7 +538,7 @@ describe("runReview end to end", () => {
     ).toEqual(expect.objectContaining({ error: "primary exploded" }));
   });
 
-  it("tags every ensemble model independently and skips verification", async () => {
+  it("tags every ensemble model independently (no findings → no verify)", async () => {
     const api = fakeOctokit({});
     const { harness } = fakeHarness({ agentic: reviewJson([]) });
     const events: HarnessTraceEvent[] = [];
@@ -449,9 +556,275 @@ describe("runReview end to end", () => {
       "ensemble:model-b:reasoning",
       "ensemble:model-b:done",
     ]);
+    // No findings survived the merge, so the verify pass has nothing to judge.
     expect(events.some((event) => event.phase?.startsWith("verify"))).toBe(
       false,
     );
+  });
+
+  it("ensemble with one failing leg degrades to the survivors and flags degraded", async () => {
+    // Three models, one fails: the two survivors both flag the same finding, so
+    // it clears the 2-of-3 majority and posts inline; the run is flagged
+    // degraded because a leg was lost.
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakePerModelHarness(
+      {
+        "model-a": reviewJson([
+          {
+            path: "svc/a.ts",
+            line: 2,
+            severity: "warning",
+            body: "A is wrong",
+          },
+        ]),
+        "model-b": reviewJson([
+          {
+            path: "svc/a.ts",
+            line: 2,
+            severity: "warning",
+            body: "A is wrong",
+          },
+        ]),
+        "model-c": new Error("whip error: context deadline exceeded"),
+      },
+      verifyAll(1),
+    );
+    const events: HarnessTraceEvent[] = [];
+
+    const result = await runReview(
+      request(api, harness, checkout(), {
+        ensembleModels: ["model-a", "model-b", "model-c"],
+        trace: (event) => events.push(event),
+      }),
+    );
+
+    // Every leg was attempted; the failed one emitted an error on its agentic
+    // pass and again on produceOne's headless fallback (a plain Error isn't a
+    // non-retryable HarnessError, so the fallback fires and also dies) before the
+    // ensemble loop caught it. Only the survivors' majority-confirmed finding
+    // posts inline, and the verify pass still runs on it (an agentic review with
+    // a checkout keeps the verifier agentic).
+    expect(events.map((e) => `${e.phase}:${e.type}`)).toEqual([
+      "ensemble:model-a:done",
+      "ensemble:model-b:done",
+      "ensemble:model-c:error",
+      "fallback:model-c:error",
+      "verify:done",
+    ]);
+    expect(result.inline.map((f) => `${f.path}:${f.line}`)).toEqual([
+      "svc/a.ts:2",
+    ]);
+    expect(result.diagnostics.degradedLegs).toEqual(["model-c"]);
+    expect(isDegraded(result.diagnostics)).toBe(true);
+    // Exactly five harness calls: one agentic per leg (3), plus produceOne's
+    // headless fallback for the dead leg (a plain Error isn't non-retryable, so
+    // the fallback fires and also dies), plus the agentic verify pass on the one
+    // majority-confirmed finding.
+    expect(contexts.length).toBe(5);
+  });
+
+  it("a lone surviving ensemble leg lands in lower-confidence, not inline-confirmed", async () => {
+    // Two models, one fails: the single survivor is below the 2-of-2 majority,
+    // so its finding flows into the lower-confidence section rather than being
+    // falsely labeled majority-confirmed. That is the honest claim for a
+    // degraded ensemble, and the run is still flagged degraded.
+    const api = fakeOctokit({});
+    const { harness } = fakePerModelHarness({
+      "model-a": reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "A is wrong" },
+      ]),
+      "model-b": new Error("whip error: context deadline exceeded"),
+    });
+
+    const result = await runReview(
+      request(api, harness, checkout(), {
+        ensembleModels: ["model-a", "model-b"],
+      }),
+    );
+
+    expect(result.inline).toEqual([]);
+    expect(result.droppedCount).toBe(0);
+    expect(result.diagnostics.degradedLegs).toEqual(["model-b"]);
+    expect(isDegraded(result.diagnostics)).toBe(true);
+    // The survivor's finding lands in the lower-confidence section of the posted
+    // summary (the honest claim for a single-model "majority"), not inline.
+    expect(result.summaryBody).toContain(
+      "Lower-confidence findings (raised by a minority of models)",
+    );
+    expect(result.summaryBody).toContain("svc/a.ts:2");
+  });
+
+  it("a leg that dies on the headless fallback does not taint the survivors' mode", async () => {
+    // Bugbot: a dead leg sets counts.mode = "fallback" before its headless
+    // retry, then the retry throws too — leaving "fallback" on shared counts.
+    // The surviving leg ran agentic and should report mode "agentic", not the
+    // dead leg's "fallback". The error script throws on every call, so the
+    // dead leg's own headless fallback also fails before the loop catches it.
+    const api = fakeOctokit({});
+    const { harness } = fakePerModelHarness({
+      "model-a": reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "A is wrong" },
+      ]),
+      "model-b": reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "A is wrong" },
+      ]),
+      "model-c": new Error("model-c died"),
+    });
+
+    const result = await runReview(
+      request(api, harness, checkout(), {
+        ensembleModels: ["model-a", "model-b", "model-c"],
+      }),
+    );
+
+    expect(result.diagnostics.mode).toBe("agentic");
+    expect(result.diagnostics.degradedLegs).toEqual(["model-c"]);
+  });
+
+  it("ensemble where the first leg fails still posts a surviving leg's review", async () => {
+    const api = fakeOctokit({});
+    const { harness } = fakePerModelHarness({
+      "model-a": new Error("400 Bad Request: prompt_cache_key"),
+      "model-b": reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "A is wrong" },
+      ]),
+      "model-c": reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "A is wrong" },
+      ]),
+    });
+
+    const result = await runReview(
+      request(api, harness, checkout(), {
+        ensembleModels: ["model-a", "model-b", "model-c"],
+      }),
+    );
+
+    // The summary/concerns come from the first SURVIVING leg (model-b), not the
+    // first configured leg (model-a) which failed.
+    expect(result.summary).toBe("reviewed");
+    expect(result.inline.map((f) => `${f.path}:${f.line}`)).toEqual([
+      "svc/a.ts:2",
+    ]);
+    expect(result.diagnostics.degradedLegs).toEqual(["model-a"]);
+  });
+
+  it("ensemble where every leg fails throws (no vacuous clean review)", async () => {
+    const api = fakeOctokit({});
+    const { harness } = fakePerModelHarness({
+      "model-a": new Error("model-a died"),
+      "model-b": new Error("model-b died"),
+    });
+
+    await expect(
+      runReview(
+        request(api, harness, checkout(), {
+          ensembleModels: ["model-a", "model-b"],
+        }),
+      ),
+    ).rejects.toThrow("all ensemble models failed");
+    // Nothing posted — the reviewer-level failure path handles visibility.
+    expect(api.calls).toEqual([]);
+  });
+
+  it("ensemble + verify coexist: the verify pass drops a majority-confirmed false positive", async () => {
+    // sebi75 (#46): turning on an ensemble used to drop the verification pass
+    // entirely. Majority agreement filters cross-model noise but not the
+    // outside-diff class — both models can agree on a claim the surrounding
+    // code refutes. The verify pass now runs on the merged inline findings too.
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakePerModelHarness(
+      {
+        "model-a": reviewJson([
+          {
+            path: "svc/a.ts",
+            line: 2,
+            severity: "warning",
+            body: "A is wrong",
+          },
+        ]),
+        "model-b": reviewJson([
+          {
+            path: "svc/a.ts",
+            line: 2,
+            severity: "warning",
+            body: "A is wrong",
+          },
+        ]),
+      },
+      // The verifier reads the checkout and refutes the majority-confirmed
+      // finding: real:false drops it, so nothing posts inline.
+      JSON.stringify({
+        verdicts: [
+          {
+            index: 0,
+            real: false,
+            reason: "early return makes this unreachable",
+          },
+        ],
+      }),
+    );
+    const events: HarnessTraceEvent[] = [];
+
+    const result = await runReview(
+      request(api, harness, checkout(), {
+        ensembleModels: ["model-a", "model-b"],
+        trace: (event) => events.push(event),
+      }),
+    );
+
+    // Both legs ran, then the verify pass ran over the one merged finding.
+    expect(events.map((e) => `${e.phase}:${e.type}`)).toEqual([
+      "ensemble:model-a:done",
+      "ensemble:model-b:done",
+      "verify:done",
+    ]);
+    // The majority-confirmed finding was rejected by verification.
+    expect(result.inline).toEqual([]);
+    expect(result.diagnostics.verify).toBe("passed");
+    expect(result.diagnostics.verifyDropped).toBe(1);
+    // Three harness calls: two agentic legs + one agentic verify.
+    expect(contexts.length).toBe(3);
+    expect(contexts[2]!.agentic).toBe(true);
+    expect(contexts[2]!.userPrompt).toContain("#0 [warning] svc/a.ts:2");
+  });
+
+  it("promptCache:true (default) stamps a stable cache key on every call", async () => {
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakeHarness({ agentic: reviewJson([]) });
+    await runReview(request(api, harness, checkout()));
+    // One agentic call; the key is repo/reviewer-scoped.
+    expect(contexts.length).toBeGreaterThanOrEqual(1);
+    for (const ctx of contexts) {
+      expect(ctx.cacheKey).toBe("loupe/acme/app/code");
+    }
+  });
+
+  it("promptCache:false omits the cache key so an incompatible model isn't 400'd", async () => {
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakeHarness({ agentic: reviewJson([]) });
+    await runReview(request(api, harness, checkout(), { promptCache: false }));
+    // No call carries a cache key — whip never sends -cache-key, so a model
+    // that rejects prompt_cache_key runs instead of 400ing.
+    expect(contexts.length).toBeGreaterThanOrEqual(1);
+    for (const ctx of contexts) {
+      expect(ctx.cacheKey).toBeUndefined();
+    }
+  });
+
+  it("promptCache:false also suppresses the verify-pass cache key", async () => {
+    const api = fakeOctokit({});
+    const { harness, contexts } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "wrong" },
+      ]),
+      verify: verifyAll(1),
+    });
+    await runReview(request(api, harness, checkout(), { promptCache: false }));
+    // The agentic run and the verify pass both run; neither carries a key.
+    expect(contexts.length).toBe(2);
+    for (const ctx of contexts) {
+      expect(ctx.cacheKey).toBeUndefined();
+    }
   });
 
   it("compare at GitHub's 300-file cap is treated as unknown history", async () => {
@@ -481,5 +854,110 @@ describe("runReview end to end", () => {
     expect(result.inlineCount).toBe(1);
     expect(api.calls).toEqual([]);
     expect(api.graphql).not.toHaveBeenCalled();
+  });
+
+  it("skips publishing when the PR merged before postReview, keeping the findings on the result", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "merged" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    // The review ran: the finding survived parsing and verification.
+    expect(result.inlineCount).toBe(1);
+    // But nothing was published onto the merged PR.
+    expect(api.calls).toEqual([]);
+    expect(api.pulls.createReview).not.toHaveBeenCalled();
+    expect(api.issues.createComment).not.toHaveBeenCalled();
+    expect(api.issues.updateComment).not.toHaveBeenCalled();
+    expect(api.graphql).not.toHaveBeenCalled();
+    // The skip is reported with the reason, and no head was stamped.
+    expect(result.skipped).toEqual({ reason: "merged" });
+    expect(result.summaryBody).toBeUndefined();
+    expect(result.reviewedHeadSha).toBeUndefined();
+  });
+
+  it("skips publishing when the PR was closed before postReview", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "closed" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "blocker", body: "boom" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.pulls.createReview).not.toHaveBeenCalled();
+    expect(result.skipped).toEqual({ reason: "closed" });
+  });
+
+  it("skips publishing when the head moved since the review started", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "moved" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.pulls.createReview).not.toHaveBeenCalled();
+    expect(result.skipped).toEqual({ reason: "head-moved" });
+  });
+
+  it("publishes normally when the PR is still open at postReview", async () => {
+    const api = fakeOctokit({ closedAs: "open" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.calls).toEqual(["createReview", "createComment"]);
+    expect(result.skipped).toBeUndefined();
+    expect(result.reviewedHeadSha).toBe(SHA_B);
+  });
+
+  it("dry run is unaffected by the publish gate", async () => {
+    const api = fakeOctokit({ threads: ["svc/a.ts"], closedAs: "merged" });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(
+      request(api, harness, checkout(), { dryRun: true }),
+    );
+
+    expect(result.inlineCount).toBe(1);
+    expect(api.calls).toEqual([]);
+    expect(result.skipped).toBeUndefined();
+  });
+
+  it("fails open: a transient publish-check error still posts the review", async () => {
+    const api = fakeOctokit({ failPublishCheck: true });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "x" },
+      ]),
+      verify: verifyAll(1),
+    });
+    const result = await runReview(request(api, harness, checkout()));
+
+    // The publish check threw, so the run posts anyway rather than dropping a
+    // completed review. The skip flag is not set — this is a real publish.
+    expect(result.inlineCount).toBe(1);
+    expect(api.calls).toEqual(["createReview", "createComment"]);
+    expect(result.skipped).toBeUndefined();
+    expect(result.reviewedHeadSha).toBe(SHA_B);
   });
 });

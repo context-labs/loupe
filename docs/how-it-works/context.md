@@ -15,7 +15,7 @@ This page expands the **Build context and run agent** box in [A review run](./re
 
 ## System prompt, in order
 
-Order matters for caching. Everything here is identical across PRs for a given reviewer, so the provider reuses the cached prefix. `-cache-key loupe/<owner>/<repo>/<reviewer>` names that prefix.
+Order matters for caching. Everything here is identical across PRs for a given reviewer, so the provider reuses the cached prefix. `-cache-key loupe/<owner>/<repo>/<reviewer>` names that prefix. The key is on by default; set `promptCache: false` (the `prompt-cache` Action input / `--no-prompt-cache` flag) for a reviewer whose model rejects `prompt_cache_key` — those models cache the prefix automatically by match, so the key is redundant. If the provider 400s on the key, the whip harness also self-heals by retrying once without it.
 
 1. **Guidance.** The reviewer's `prompt` or `promptFile`, verbatim. It replaces loupe's default guidance when set.
 2. **Procedure.** Always appended, even under custom guidance: locate and read the callers of every changed export before judging, follow thin wrappers one more hop, treat a newly interactive or blocking call inside a spinner or other terminal-owning wrapper as a defect. `procedure: false` removes it.

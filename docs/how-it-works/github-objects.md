@@ -12,7 +12,7 @@ Three kinds of object, all owned by loupe's TypeScript, never by the agent.
 
 ## The posting sequence
 
-This page expands the **Post review and summary** box in [A review run](./review-run.md#pipeline). Each reviewer snapshots eligible prior threads, posts any required inline review, and then resolves, deletes, or keeps that snapshot according to `priorComments`. After all parallel reviewers finish, the orchestrator creates or updates one combined summary. On migration, old bot-authored per-reviewer summaries are removed after the combined comment exists.
+This page expands the **Post review and summary** box in [A review run](./review-run.md#pipeline). Right before a reviewer publishes, a freshness check re-reads the PR and skips that reviewer's publish if it has merged, closed, or had its head move since the reviewer fetched the PR — the findings stay computed but nothing is written onto a diff nobody can act on (issue #39). Each reviewer snapshots eligible prior threads, posts any required inline review, and then resolves, deletes, or keeps that snapshot according to `priorComments`. After all parallel reviewers finish, a lighter check gates the combined summary against only a merge or close (head movement is already handled per reviewer, so no run-start head anchor is needed): a merged/closed PR keeps its prior summary rather than being overwritten with new findings. On migration, old bot-authored per-reviewer summaries are removed after the combined comment exists.
 
 ## Review verdict
 

@@ -21,6 +21,7 @@ import picomatch from "picomatch";
 
 import {
   changedFilesBetween,
+  checkPublishable,
   cleanupStrandedThreads,
   fetchConventions,
   fetchPullContext,
@@ -29,6 +30,7 @@ import {
   type PriorComments,
   type PullRef,
   type ReviewDiagnostics,
+  type SkipReason,
 } from "./github";
 import { majority, mergeEnsemble } from "./ensemble";
 import { parseReviewOutput, parseVerification } from "./parse";
@@ -127,8 +129,10 @@ export type ReviewRequest = {
   readonly full?: boolean;
   /**
    * Run the review with several models (on the harness) and keep only findings a
-   * majority agree on; minority findings are surfaced as lower-confidence.
-   * Supersedes the verification pass. Needs >= 2 models to take effect.
+   * majority agree on; minority findings are surfaced as lower-confidence. The
+   * verification pass still runs after the merge: majority agreement filters
+   * cross-model noise but not the outside-diff class (several models can agree
+   * on a claim the surrounding code refutes). Needs >= 2 models to take effect.
    */
   readonly ensembleModels?: readonly string[];
   /**
@@ -145,6 +149,16 @@ export type ReviewRequest = {
   readonly priorComments?: PriorComments;
   /** Append the always-on review procedure to the system prompt (default true). */
   readonly procedure?: boolean;
+  /**
+   * Send a stable prompt-cache key to the harness so the provider reuses the
+   * cached system prefix across runs. Default true (a real cost win for models
+   * whose endpoint honors it). Set false for a reviewer whose model rejects
+   * `prompt_cache_key` as an unrecognized argument; those models cache the
+   * stable prefix automatically by prefix match, so the key adds nothing and
+   * its presence can 400. The whip harness also self-heals a cache-key 400 by
+   * retrying without the key, so this flag only skips that wasted round-trip.
+   */
+  readonly promptCache?: boolean;
   /** Post inline findings now, but let the caller aggregate the summary. */
   readonly deferSummary?: boolean;
   /**
@@ -168,6 +182,13 @@ export type ReviewResult = {
   readonly summaryBody?: string;
   /** Present only when this run actually reviewed and published the PR head. */
   readonly reviewedHeadSha?: string;
+  /**
+   * Present when findings were computed but not published because the PR was no
+   * longer safe to post onto (merged, closed, or the head moved since the review
+   * started). The reviewer stays silent on GitHub rather than commenting on a
+   * dead diff. See issue #39.
+   */
+  readonly skipped?: { readonly reason: SkipReason };
 };
 
 const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
@@ -180,6 +201,7 @@ const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
   verifyDropped: 0,
   offDiff: 0,
   salvagedFindings: 0,
+  degradedLegs: [],
 };
 
 /** End-to-end: fetch PR + conventions, run the harness, post the review. */
@@ -424,8 +446,14 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     : headlessUserPrompt;
 
   // Stable prompt-cache key per repo+reviewer so whip reuses the cached system
-  // prefix across runs (and its own turns within a run).
-  const cacheKey = `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}`;
+  // prefix across runs (and its own turns within a run). Omitted when a
+  // reviewer opted out of prompt caching (promptCache:false) — a model whose
+  // endpoint rejects prompt_cache_key. whip then never sends -cache-key, so no
+  // 400 and no self-heal retry. Those models cache the prefix by match anyway.
+  const cacheKey =
+    req.promptCache !== false
+      ? `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}`
+      : undefined;
 
   // Noise profile: hard-filter by severity (the prompt asks too, this enforces).
   const keep = new Set(severitiesForProfile(profile));
@@ -495,8 +523,13 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
         error: err instanceof Error ? err.message : String(err),
         kind: err instanceof HarnessError ? err.kind : undefined,
       });
-      counts.mode = "fallback";
+      // Set the fallback mode only once the headless retry actually resolves.
+      // In an ensemble, this runs per leg against shared counts; a leg that
+      // dies on the fallback too must not leave "fallback" behind to taint the
+      // survivors' mode (otherwise a fully-agentic survivor review renders as
+      // "headless fallback (agentic run failed)" in Run details).
       parsed = await run(false, model ? `fallback:${model}` : "fallback");
+      counts.mode = "fallback";
     }
     counts.malformedFindings += parsed.malformedFindings;
     counts.malformedConcerns += parsed.malformedConcerns;
@@ -530,16 +563,42 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
   let uncertain: Finding[] = [];
   let verify: ReviewDiagnostics["verify"] = "skipped";
   let verifyDropped = 0;
+  // Models that failed and were dropped from an ensemble merge so the
+  // surviving legs' findings still post. Stays empty for a non-ensemble run or
+  // a fully-successful one; populated per leg below. Surfaced on the summary as
+  // a degraded-run note so a lost leg never reads as silence.
+  let failedLegs: string[] = [];
 
   if (ensemble) {
     logger.info("Ensemble review", { models: ensemble });
-    const [firstModel, ...restModels] = ensemble;
-    const firstRun = await produceOne(firstModel, "ensemble");
-    const runs = [firstRun];
-    for (const model of restModels)
-      runs.push(await produceOne(model, "ensemble")); // sequential
-    review = firstRun.review;
-    dropped = firstRun.dropped;
+    const runs: { inline: Finding[]; review: ReviewOutput; dropped: Note[] }[] =
+      [];
+    for (const model of ensemble) {
+      try {
+        runs.push(await produceOne(model, "ensemble"));
+      } catch (err) {
+        const legModel = model ?? "(harness default)";
+        failedLegs.push(legModel);
+        logger.warn("Ensemble leg failed; degrading to remaining models", {
+          model: legModel,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    // Borrow the review body (summary/concerns/highlights) from the first
+    // surviving leg, not the first configured leg — the first leg may be one
+    // that failed. If no leg survived, let the reviewer-level failure path post
+    // the ⚠️ comment and exit 1 rather than posting a vacuous "clean" review.
+    const [firstSurvivor] = runs;
+    if (!firstSurvivor) {
+      throw new Error(`all ensemble models failed: ${failedLegs.join(", ")}`);
+    }
+    review = firstSurvivor.review;
+    dropped = firstSurvivor.dropped;
+    // Keep the majority threshold relative to the configured panel, not the
+    // survivors: a lone survivor's findings have models.size < threshold and
+    // flow into the existing lower-confidence section — the honest claim for a
+    // degraded ensemble, never a false "majority confirmed".
     const merged = mergeEnsemble(
       runs.map((r) => r.inline),
       majority(ensemble.length),
@@ -549,30 +608,36 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     logger.info("Ensemble merged", {
       confirmed: inline.length,
       uncertain: uncertain.length,
+      degradedLegs: failedLegs,
     });
   } else {
     const one = await produceOne(req.model);
     review = one.review;
     dropped = one.dropped;
     inline = one.inline;
-    // Verification pass: a second opinion that drops false positives. When the
-    // review was agentic and a real checkout exists, verify agentic too so the
-    // verifier can read the surrounding code that refutes (or confirms) each
-    // finding — instead of acquitting outside-diff claims it can't see.
-    if (req.verify !== false && inline.length > 0) {
-      const v = await verifyInline(
-        req,
-        files,
-        inline,
-        harnessCwd,
-        agentic,
-        hasCheckout,
-        subdir && harnessCwd === scoped ? subdir : undefined,
-      );
-      verify = v.status;
-      verifyDropped = inline.length - v.kept.length;
-      inline = v.kept;
-    }
+  }
+
+  // Verification pass: a second opinion that drops false positives. Runs after
+  // both a single-model review and an ensemble merge — majority agreement
+  // filters cross-model noise but not the outside-diff class (several models
+  // can agree on a claim the surrounding code refutes), so the verifier still
+  // reads the checkout and marks `real: false` when it does. When the review
+  // was agentic and a real checkout exists, verify agentic too so the verifier
+  // can read the surrounding code that refutes (or confirms) each finding
+  // — instead of acquitting outside-diff claims it can't see.
+  if (req.verify !== false && inline.length > 0) {
+    const v = await verifyInline(
+      req,
+      files,
+      inline,
+      harnessCwd,
+      agentic,
+      hasCheckout,
+      subdir && harnessCwd === scoped ? subdir : undefined,
+    );
+    verify = v.status;
+    verifyDropped = inline.length - v.kept.length;
+    inline = v.kept;
   }
 
   if (dropped.length > 0) {
@@ -594,6 +659,7 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
     verifyDropped,
     offDiff: dropped.length,
     salvagedFindings: counts.salvagedFindings,
+    degradedLegs: failedLegs,
   };
 
   // Ensemble minority findings go in a collapsed lower-confidence section.
@@ -632,6 +698,34 @@ export async function runReview(req: ReviewRequest): Promise<ReviewResult> {
       diagnostics,
     });
     return result;
+  }
+
+  // The review ran for minutes; the PR can merge, close, or receive a new push
+  // in that window. Re-read it right before publishing and stay silent if it is
+  // no longer safe to post onto — findings anchored to a dead diff read as the
+  // author ignoring a tool they never had a chance to act on (issue #39). The
+  // findings stay on the result for the trace; only the GitHub writes are
+  // suppressed. The check itself failing open: a lookup error proceeds to post,
+  // since a stale-but-correct finding is better than a silent dropped review.
+  const publishable = await checkPublishable(
+    octokit,
+    req.ref,
+    pull.headSha,
+  ).catch((err: unknown) => {
+    logger.warn("Publishability check failed; posting anyway", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { publishable: true } as const;
+  });
+  if (!publishable.publishable) {
+    logger.warn("Skipping publish — PR no longer safe to post onto", {
+      reviewer: req.reviewerName ?? "default",
+      reason: publishable.reason,
+      inline: inline.length,
+      dropped: dropped.length,
+      verdict,
+    });
+    return { ...result, skipped: { reason: publishable.reason } };
   }
 
   const summaryBody = await postReview(
@@ -691,7 +785,10 @@ async function verifyInline(
       whipConfig: req.whipConfig,
       maxTurns: req.maxTurns,
       reasoning: req.reasoning,
-      cacheKey: `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`,
+      cacheKey:
+        req.promptCache !== false
+          ? `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`
+          : undefined,
       trace: req.trace,
       phase: req.model ? `verify:${req.model}` : "verify",
       logger: req.logger,

@@ -55,6 +55,7 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 | `--no-agentic` | (agentic on) | Review one-shot from the diff, no tool use. |
 | `--profile <name>` | `chill` | Noise: `quiet` \| `chill` \| `assertive`. |
 | `--no-verify` | (verify on) | Skip the verification pass. |
+| `--no-prompt-cache` | (cache on) | Don't send a prompt-cache key (for models that reject `prompt_cache_key`). |
 | `--timezone <tz>` | `UTC` | Timezone label for the review environment line (e.g. `PST`). |
 | `--ensemble <models>` | — | Run several models; keep findings a majority agree on. |
 | `--full` | off | Whole-PR review instead of the incremental delta. |
