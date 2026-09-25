@@ -11,8 +11,11 @@ flowchart LR
     C -->|no| X[Stop; preserve prior comments]
     C -->|yes| D[Build context and run agent]
     D --> E[Parse, anchor, and filter findings]
-    E --> F[Verify or reach ensemble consensus]
-    F --> G[Post review and summary]
+    E --> F{Ensemble?}
+    F -->|yes| M[Merge; majority keeps findings inline]
+    F -->|no| V[Verify: agentic or headless]
+    M --> V
+    V --> G[Post review and summary]
 ```
 
 ## Step by step
