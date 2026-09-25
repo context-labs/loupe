@@ -2,7 +2,7 @@
   "harness": "whip",
   "model": "glm-5.3",
   "timezone": "PST",
-  "maxTurns": 2,
+  "maxTurns": 25,
   "whip": {
     "provider": {
       "name": "inference-net",
@@ -33,7 +33,7 @@
         "**/tests/**",
         "**/dist/**"
       ],
-      "reasoning": "low"
+      "reasoning": "medium"
     },
     {
       "name": "docs",
@@ -52,8 +52,7 @@
         "**/tests/**",
         "**/dist/**"
       ],
-      "reasoning": "low",
-      "maxTurns": 7,
+      "reasoning": "medium",
       "pathInstructions": [
         {
           "glob": "action.yml",
