@@ -27,7 +27,7 @@ flowchart LR
 8. **Anchor.** GitHub only accepts inline comments on lines present in the diff. A finding on an exact diff line stays inline. One within 10 lines snaps to the nearest diff line. Anything else, or on a file not in scope, becomes an off-diff note in the summary.
 9. **Profile filter.** `quiet` keeps blockers, `chill` (default) keeps blockers and warnings, `assertive` keeps everything.
 10. **Verify.** If any inline findings survived and `verify` is on (default), one more headless call asks the same model to mark each `real: true|false`. It may reject a finding only when the diff itself contradicts it; evidence outside the diff is not grounds for rejection. Findings judged not real are dropped and counted. An error, or a verdict set that is not exactly one verdict per finding, keeps them all and marks verification `failed` or `invalid`. An `ensemble` (≥2 models) replaces this step: every model runs the review, only findings a majority agrees on stay inline, and minority findings are surfaced in a collapsed lower-confidence section.
-11. **Post.** See [GitHub objects](./github-objects.md).
+11. **Post.** Right before publishing, a freshness check re-reads the PR and skips the publish if it has merged, closed, or had its head move since the review started — findings were computed but are not posted onto a diff nobody can act on (issue #39). The reviewer is rendered as `⏸️ Skipped` in the combined summary. See [GitHub objects](./github-objects.md).
 
 ## Limits
 

@@ -26,6 +26,7 @@ import type { Config } from "./config";
 import {
   CombinedSummaryPublicationError,
   runReviews,
+  skipReasonText,
   type ReviewerOutcome,
 } from "./orchestrate";
 import { loadReviewers } from "./reviewers";
@@ -57,6 +58,9 @@ async function postFailure(
 function outcomeLine(o: ReviewerOutcome): string {
   if (!o.ok) return `${o.name}: ⚠️ failed (see the failure comment)`;
   const r: ReviewResult = o.result;
+  if (r.skipped) {
+    return `${o.name}: ⏸️ skipped (PR ${skipReasonText(r.skipped.reason)})`;
+  }
   if (
     r.inlineCount === 0 &&
     r.summary.startsWith("No changed files in scope")
@@ -75,6 +79,26 @@ function outcomeLine(o: ReviewerOutcome): string {
 }
 
 /**
+ * When the PR merged or closed while an `@loupe review` re-review was running,
+ * the ack is still resolved — but with a short closure message instead of the
+ * verdict summary, so findings never land on a dead PR (issue #39). Returns the
+ * closure message, or `undefined` when the PR is still open (post the verdict).
+ * Pure so the gate is unit-testable without a network mock.
+ */
+export function closureMessageIfPrNotOpen(pr: {
+  merged: boolean;
+  state: string;
+}): string | undefined {
+  if (pr.merged) {
+    return "⏸️ Re-review ran, but the PR merged before loupe could publish — nothing was posted.";
+  }
+  if (pr.state === "closed") {
+    return "⏸️ Re-review ran, but the PR closed before loupe could publish — nothing was posted.";
+  }
+  return undefined;
+}
+
+/**
  * The comment that replaces the "On it" ack once a forced re-review finishes.
  * Summaries are updated in place higher up the thread, so without this the
  * only evidence a re-review ran is an "edited" label the reader never sees.
@@ -90,9 +114,14 @@ export function renderReviewCompletion(
     outcomes.every(
       (o) => o.ok && o.result.summary.startsWith("No changed files in scope"),
     );
+  const allSkipped =
+    outcomes.length > 0 &&
+    outcomes.every((o) => o.ok && o.result.skipped !== undefined);
   const scopeNote = noneInScope
     ? `\n\nNothing to review: this loupe config covers ${dirs?.length ? dirs.map((d) => `\`${d}/\``).join(", ") : "the whole repo"} and no changed file is under it.`
-    : "\n\nThe combined Loupe summary above was updated in place.";
+    : allSkipped
+      ? "\n\nThe PR changed before loupe could publish, so nothing was posted."
+      : "\n\nThe combined Loupe summary above was updated in place.";
   return `✅ Re-review of \`${headSha.slice(0, 7)}\` done.\n\n${lines}${scopeNote}`;
 }
 
@@ -274,12 +303,33 @@ export async function handleComment(
       outcomes = await runReviews(config, logger, true);
       if (outcomes.some((o) => !o.ok)) process.exitCode = 1;
       const { data: pr } = await octokit.pulls.get(ref);
-      await updateIssueComment(
-        octokit,
-        ref,
-        ackId,
-        renderReviewCompletion(outcomes, pr.head.sha, config.dirs),
-      );
+      // Apply the same freshness rule as the combined-summary gate (issue #39):
+      // the re-review was an explicit request, so the ack should still resolve —
+      // but if the PR merged or closed while the reviewers ran, do not post the
+      // verdict summary onto a dead PR. A short closure message resolves the ack
+      // without carrying findings. This reuses the fetch already needed for the
+      // header SHA, so it adds no API call.
+      const closure = closureMessageIfPrNotOpen({
+        merged: Boolean(pr.merged),
+        state: pr.state,
+      });
+      if (closure) {
+        logger.warn(
+          "Skipping re-review completion verdict — PR no longer open",
+          {
+            merged: Boolean(pr.merged),
+            state: pr.state,
+          },
+        );
+        await updateIssueComment(octokit, ref, ackId, closure);
+      } else {
+        await updateIssueComment(
+          octokit,
+          ref,
+          ackId,
+          renderReviewCompletion(outcomes, pr.head.sha, config.dirs),
+        );
+      }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       logger.error("Chat command failed: review", { error: reason });

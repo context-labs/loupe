@@ -62,6 +62,65 @@ export async function fetchPullContext(
   };
 }
 
+/**
+ * Why a pre-publish review was skipped. The PR can change state between the
+ * start of a run and the moment loupe is ready to post; re-reading it right
+ * before publishing catches a merge, close, or head move that happened while
+ * inference was running. See issue #39.
+ */
+export type SkipReason = "merged" | "closed" | "head-moved";
+
+/** A pre-publish freshness check result: either publishable, or why not. */
+export type PublishCheck =
+  | { readonly publishable: true }
+  | { readonly publishable: false; readonly reason: SkipReason };
+
+/**
+ * Re-read the pull request right before publishing and decide whether it is
+ * still safe to post findings onto it. The review runs for minutes and the PR
+ * can merge, close, or receive a new push in that window; posting onto a dead
+ * diff reads as the author ignoring the tool when they never had a chance.
+ *
+ * `reviewedHeadSha` is the head SHA the review was computed against (captured
+ * at the start of the run). A different current head means the findings are
+ * anchored to a commit the branch has moved past, so they are not published.
+ */
+export async function checkPublishable(
+  octokit: Octokit,
+  ref: PullRef,
+  reviewedHeadSha: string,
+): Promise<PublishCheck> {
+  const { data: pr } = await octokit.pulls.get(ref);
+  if (pr.merged) return { publishable: false, reason: "merged" };
+  if (pr.state === "closed") return { publishable: false, reason: "closed" };
+  if (pr.head.sha !== reviewedHeadSha) {
+    return { publishable: false, reason: "head-moved" };
+  }
+  return { publishable: true };
+}
+
+/**
+ * Re-read the pull request and report whether it is still open (not merged, not
+ * closed). Used to gate writes that carry findings but are not anchored to a
+ * specific head — the combined summary — where a head move is already handled
+ * per reviewer (`checkPublishable`) and the only fatal state is the PR being
+ * gone. Comparing heads here would need a run-start anchor that can race the
+ * reviewers' own fetches and falsely skip a summary whose inline comments are
+ * valid on the current head, so this check deliberately ignores the head.
+ */
+export async function checkPrOpen(
+  octokit: Octokit,
+  ref: PullRef,
+): Promise<
+  | { readonly open: true }
+  | { readonly open: false; readonly reason: "merged" | "closed" }
+> {
+  const { data: pr } = await octokit.pulls.get(ref);
+  if (pr.merged) return { open: false, reason: "merged" };
+  if (pr.state === "closed") return { open: false, reason: "closed" };
+  return { open: true };
+}
+
 /** Login the workflow token posts as when `GET /user` is unavailable to it. */
 const ACTIONS_BOT_LOGIN = "github-actions[bot]";
 const selfLogins = new WeakMap<Octokit, Promise<string>>();
@@ -570,6 +629,13 @@ export type ReviewDiagnostics = {
   readonly offDiff: number;
   /** Schema-rejected findings kept as notes instead of dropped. */
   readonly salvagedFindings: number;
+  /**
+   * Ensemble models that failed and were dropped from the merge so the
+   * surviving legs' findings still post. Empty (and undefined semantically)
+   * for a non-ensemble or fully-successful run; names the failed model ids
+   * otherwise, so the summary can flag the review as degraded.
+   */
+  readonly degradedLegs: readonly string[];
 };
 
 /** True when the run lost or skipped something the reader should know about. */
@@ -580,7 +646,8 @@ export function isDegraded(d: ReviewDiagnostics): boolean {
     d.verify === "failed" ||
     d.incremental === "unknown" ||
     d.malformedDropped.findings + d.malformedDropped.concerns > 0 ||
-    d.salvagedFindings > 0
+    d.salvagedFindings > 0 ||
+    d.degradedLegs.length > 0
   );
 }
 
@@ -597,6 +664,15 @@ function renderDiagnostics(d: ReviewDiagnostics): string {
         ? ` (${d.salvagedFindings} salvaged from malformed finding(s))`
         : ""
     }`,
+    // Only surface an ensemble row when a leg was actually lost. A clean
+    // ensemble has nothing to flag, and a non-ensemble run has no ensemble to
+    // report on — rendering "all models completed" for either would be noise
+    // (and a plain single-model review isn't an ensemble at all).
+    ...(d.degradedLegs.length > 0
+      ? [
+          `- ensemble: ⚠️ degraded — ${d.degradedLegs.length} model(s) failed and dropped: ${d.degradedLegs.join(", ")}`,
+        ]
+      : []),
   ];
   return `<details><summary>Run details</summary>\n\n${rows.join("\n")}\n\n</details>`;
 }
@@ -794,6 +870,24 @@ function priorReviewerSection(
   return marker ? section : undefined;
 }
 
+/**
+ * True for a combined-summary section body that carries no findings and should
+ * be restored from the prior summary: either the `_Not run:` stub (a reviewer
+ * with nothing to reassess) or the `Skipped:` stub (a pre-publish freshness
+ * skip - findings were computed but not posted, so the section has no SHA
+ * marker and no content worth keeping). Both would otherwise wipe the
+ * reviewer's previous findings when the combined summary is upserted, since
+ * the summary gate only blocks merged/closed PRs and a head-moved PR is still
+ * open (issue #39).
+ */
+function isNoUpdateStub(content: string): boolean {
+  const trimmed = content.trim();
+  return (
+    /^## [^\n]+\n\n_Not run: [^\n]*_$/s.test(trimmed) ||
+    /^## [^\n]+\n\n\u23F8\uFE0F Skipped: /.test(trimmed)
+  );
+}
+
 function preserveSkippedSummarySections(
   body: string,
   priorBody?: string,
@@ -805,7 +899,7 @@ function preserveSkippedSummarySections(
   const marked = body.replace(
     /<!-- loupe:section:([^\s]+):start -->\n([\s\S]*?)\n<!-- loupe:section:\1:end -->/g,
     (section, reviewer: string, content: string) => {
-      if (!/^## [^\n]+\n\n_Not run: [^\n]*_$/s.test(content.trim())) {
+      if (!isNoUpdateStub(content)) {
         return section;
       }
       const priorSection = priorReviewerSection(priorBody, reviewer);
@@ -818,7 +912,7 @@ function preserveSkippedSummarySections(
   // Backward compatibility for callers/new bodies created before section
   // boundaries were introduced.
   return marked.replace(
-    /## ([^\n]+)\n\n_Not run: [^\n]*_(?=\n\n---|$)/g,
+    /## ([^\n]+)\n\n(_Not run: [^\n]*_|\u23F8\uFE0F Skipped: [^\n]*)(?=\n\n---|$)/g,
     (stub, reviewer: string) => {
       const priorSection = priorReviewerSection(priorBody, reviewer);
       return priorSection

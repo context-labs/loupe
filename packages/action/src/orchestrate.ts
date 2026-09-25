@@ -1,4 +1,6 @@
 import {
+  checkPrOpen,
+  checkPublishable,
   dedupeFindings,
   makeOctokit,
   postIssueComment,
@@ -8,6 +10,7 @@ import {
   type ReviewDiagnostics,
   type ReviewResult,
   type ReviewerFindings,
+  type SkipReason,
 } from "@loupe/core";
 import { HarnessError, type HarnessErrorKind } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
@@ -114,20 +117,24 @@ async function produceOne(
   }
 }
 
-/**
- * Run the configured review(s) for a PR — either the reviewer profiles from
- * `.loupe.json`, or a single default review. Shared by the pull_request entry
- * (main) and the `@loupe review` chat command. `overrideFull` forces a whole-PR
- * review regardless of config. Reviewer failures are reported on the PR here
- * and returned as outcomes. Only setup errors (bad config) reject.
- */
-function renderCombinedSummary(outcomes: readonly ReviewerOutcome[]): string {
+/** Human phrasing for a pre-publish skip, for the combined summary and re-review comment. */
+export function skipReasonText(reason: SkipReason): string {
+  if (reason === "merged") return "merged";
+  if (reason === "closed") return "closed";
+  return "head moved";
+}
+
+export function renderCombinedSummary(
+  outcomes: readonly ReviewerOutcome[],
+): string {
   const sections = outcomes.map((outcome) => {
     const start = `<!-- loupe:section:${outcome.name}:start -->`;
     const end = `<!-- loupe:section:${outcome.name}:end -->`;
     let content: string;
     if (!outcome.ok) {
       content = `## ${outcome.name}\n\n⚠️ Reviewer failed: ${outcome.error.split("\n")[0]?.slice(0, 300)}`;
+    } else if (outcome.result.skipped) {
+      content = `## ${outcome.name}\n\n⏸️ Skipped: the PR ${skipReasonText(outcome.result.skipped.reason)} before loupe could publish. Findings were computed but not posted.`;
     } else if (!outcome.result.summaryBody) {
       content = `## ${outcome.name}\n\n_Not run: ${outcome.result.summary}_`;
     } else {
@@ -145,12 +152,24 @@ function renderCombinedSummary(outcomes: readonly ReviewerOutcome[]): string {
   ].join("\n\n---\n\n");
 }
 
+/**
+ * Run the configured review(s) for a PR — either the reviewer profiles from
+ * `.loupe.json`, or a single default review. Shared by the pull_request entry
+ * (main) and the `@loupe review` chat command. `overrideFull` forces a whole-PR
+ * review regardless of config. Reviewer failures are reported on the PR here
+ * and returned as outcomes. Only setup errors (bad config) reject.
+ */
 export async function runReviews(
   config: Config,
   logger: Logger,
   overrideFull?: boolean,
 ): Promise<ReviewerOutcome[]> {
   const full = overrideFull ?? config.full;
+  const ref = {
+    owner: config.owner,
+    repo: config.repo,
+    pull_number: config.pullNumber,
+  };
   const base = {
     token: config.token,
     owner: config.owner,
@@ -329,48 +348,93 @@ export async function runReviews(
         crossReviewerDropped: suppressed,
       };
       const result = resultFromProduced(producedReview, inline, diagnostics);
-      return publishReviewPullRequest(
-        p.input,
-        producedReview,
-        inline,
-        diagnostics,
+      // Gate each reviewer's publish on the PR still being safe to post onto
+      // (issue #39). The produce/publish split moved posting out of runReview,
+      // so the gate that runReview had must be applied here too — otherwise the
+      // multi-reviewer path posts to a merged/closed/head-moved diff. Fails open:
+      // a transient API error posts rather than dropping a completed review.
+      return checkPublishable(
+        makeOctokit(p.input.token, logger),
+        {
+          owner: p.input.owner,
+          repo: p.input.repo,
+          pull_number: p.input.pullNumber,
+        },
+        producedReview.headSha,
       )
-        .then((summaryBody) => {
-          logger.info(`[${p.label}] ${formatResult(result)}`);
-          return {
-            name: p.outcome.name,
-            ok: true as const,
-            result: {
-              ...result,
-              summaryBody,
-              reviewedHeadSha: producedReview.headSha,
-            },
-          };
-        })
-        .catch((err: unknown) => {
-          // Publishing failed after a successful produce. Report it as a failed
-          // outcome so the combined summary surfaces it, without re-running the
-          // reviewer (the model calls already succeeded).
-          const reason = err instanceof Error ? err.message : String(err);
-          logger.error(`[${p.label}] review post failed`, { error: reason });
-          return {
-            name: p.outcome.name,
-            ok: false as const,
-            error: reason,
-            kind: err instanceof HarnessError ? err.kind : undefined,
-          };
+        .catch(() => ({ publishable: true }) as const)
+        .then((publishable): Promise<ReviewerOutcome> => {
+          if (!publishable.publishable) {
+            logger.warn(`[${p.label}] skipping publish — PR no longer safe`, {
+              reason: publishable.reason,
+            });
+            return Promise.resolve({
+              name: p.outcome.name,
+              ok: true,
+              result: { ...result, skipped: { reason: publishable.reason } },
+            });
+          }
+          return publishReviewPullRequest(
+            p.input,
+            producedReview,
+            inline,
+            diagnostics,
+          )
+            .then((summaryBody) => {
+              logger.info(`[${p.label}] ${formatResult(result)}`);
+              return {
+                name: p.outcome.name,
+                ok: true as const,
+                result: {
+                  ...result,
+                  summaryBody,
+                  reviewedHeadSha: producedReview.headSha,
+                },
+              };
+            })
+            .catch((err: unknown) => {
+              // Publishing failed after a successful produce. Report it as a failed
+              // outcome so the combined summary surfaces it, without re-running the
+              // reviewer (the model calls already succeeded).
+              const reason = err instanceof Error ? err.message : String(err);
+              logger.error(`[${p.label}] review post failed`, {
+                error: reason,
+              });
+              return {
+                name: p.outcome.name,
+                ok: false as const,
+                error: reason,
+                kind: err instanceof HarnessError ? err.kind : undefined,
+              };
+            });
         });
     }),
   );
 
+  // Gate the combined summary on the PR being still open (issue #39). The
+  // summary carries finding summaries and must not land on a PR that merged or
+  // closed while the reviewers were running; the prior summary (posted when the
+  // PR was open) stays in place rather than being overwritten on a dead diff.
+  // A head move is deliberately NOT checked here: head movement is already
+  // handled per reviewer (`checkPublishable` anchors on each reviewer's own
+  // fetched head), and a run-start head anchor would race the reviewers' own
+  // fetches and falsely skip a summary whose inline comments are valid on the
+  // current head. Fails open: a transient API error posts rather than dropping
+  // a completed review's summary.
+  const open = await checkPrOpen(makeOctokit(config.token, logger), ref).catch(
+    () => ({ open: true }) as const,
+  );
+  if (!open.open) {
+    logger.warn("Skipping combined summary — PR is no longer open", {
+      reason: open.reason,
+    });
+    return outcomes;
+  }
+
   try {
     await upsertCombinedSummary(
       makeOctokit(config.token, logger),
-      {
-        owner: config.owner,
-        repo: config.repo,
-        pull_number: config.pullNumber,
-      },
+      ref,
       renderCombinedSummary(outcomes),
     );
   } catch (err) {
