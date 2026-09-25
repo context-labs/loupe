@@ -41,8 +41,7 @@ jobs:
         run: |
           tag=$(gh release view --repo context-labs/whip --json tagName -q .tagName)
           echo "Installing whip $tag"
-          curl -fsSL -o whip \
-            "https://github.com/context-labs/whip/releases/download/${tag}/whip-linux-x64"
+          gh release download "$tag" --repo context-labs/whip --pattern "*-linux-x64" --output whip --clobber
           chmod +x whip
           sudo mv whip /usr/local/bin/whip
           whip --version || true
