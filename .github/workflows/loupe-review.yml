@@ -35,7 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install whip (pinned v0.6.5)
-        continue-on-error: true
+        # A failed install means the harness is broken — fail the check.
+        # (Deterministic pinned download; there is nothing advisory here.)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -59,9 +60,21 @@ jobs:
           secret-path: "/loupe"
           include-imports: true
       - name: Review
+        # Keep advisory: loupe findings are comments, not a merge gate. The
+        # `harness-health` gate below converts a broken harness (whip missing,
+        # 404ing, renamed) into a red check instead of silent green.
+        id: loupe-run
         continue-on-error: true
         uses: context-labs/loupe@main
         with:
           config: .loupe/config.json
         env:
           INFERENCE_API_KEY: ${{ env.INFERENCE_NET_API_KEY }}
+      - name: Harness health gate
+        # Fail the GitHub check when the whip harness is broken. `status`:
+        # ok | quota | rate-limit | failed. harness/setup failures surface as
+        # "failed"; quota/rate-limit are provider-side and stay advisory (INF-5559).
+        if: always() && steps.loupe-run.outputs.status == 'failed'
+        run: |
+          echo "loupe review failed: the whip harness is broken (see the Review step logs)."
+          exit 1

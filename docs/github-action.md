@@ -115,12 +115,36 @@ gh api -X PUT repos/context-labs/loupe/actions/permissions/access \
 
 ## Recommended posture
 
-- **Advisory:** `continue-on-error: true`, not a required check — findings are PR
-  comments, never a merge gate.
+- **Advisory, but not silently green:** `continue-on-error: true`, not a required
+  check — findings are PR comments, never a merge gate. A failed harness is a
+  different story: `continue-on-error` converts the step's failure into a green
+  check, so a broken whip harness (missing/404ing/renamed binary, bad install)
+  leaves the PR looking reviewed when nothing ran. Keep the step advisory and
+  add a **harness health gate** step that fails the job only when `status` is
+  `failed` (harness/setup breakage). `quota` and `rate-limit` are provider-side
+  and stay advisory.
+
+  ```yaml
+  - name: Review
+    id: loupe-run
+    continue-on-error: true
+    uses: context-labs/loupe@v0
+    with:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  - name: Harness health gate # red check when the harness broke; not for findings
+    if: always() && steps.loupe-run.outputs.status == 'failed'
+    run: |
+      echo "loupe could not review: the harness is broken (see the Review step logs)."
+      exit 1
+  ```
+
+  A step cannot fail its own job from inside an action, so the gate must live in
+  the consuming workflow — this is the documented, supported pattern.
 - **Cadence:** `ready_for_review` + skip drafts + `concurrency: cancel-in-progress`
   so drafts are ignored and rapid pushes collapse to the latest commit.
 - **De-dup:** loupe deletes each reviewer's prior comments before re-posting, so
   re-reviews replace rather than accumulate.
+
 ## Branching on failure
 
 The action exposes a `status` output so a workflow can detect a failed review
