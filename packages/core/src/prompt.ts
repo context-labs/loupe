@@ -93,8 +93,19 @@ Procedure — do these before writing any finding:
 2. Follow one more hop when the caller is itself a thin wrapper (e.g. a
    \`login()\` that just calls the changed function): its callers inherit the
    change too.
-3. Only then judge the diff's own logic.
-State in the summary which callers you checked.`.trim();
+3. NEVER assert that something is missing, absent, not created, not updated,
+   not imported, not registered, not called, or not handled without CONFIRMING
+   it against the real checkout first — \`ls\` the directory, \`cat\`/grep the
+   file, read the sibling files. The diff is not the filesystem: on an
+   incremental run it shows only what changed since the last review, so a file
+   or edit that is NOT in the diff may still exist on disk from an earlier
+   commit. "Missing snapshot.json", "head file not updated", "no test added",
+   "import not added" are the most common false positives — each is only a
+   finding if a tool confirmed the absence. If you cannot confirm an absence
+   with a tool, do not flag it.
+4. Only then judge the diff's own logic.
+State in the summary which callers you checked and which absence claims you
+verified against the checkout.`.trim();
 
 const OUTPUT_CONTRACT = `
 Respond with ONE JSON object and NOTHING else — no prose before or after it,
