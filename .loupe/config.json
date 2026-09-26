@@ -2,7 +2,7 @@
   "harness": "whip",
   "model": "glm-5.3",
   "timezone": "PST",
-  "maxTurns": 25,
+  "maxTurns": 15,
   "whip": {
     "provider": {
       "name": "inference-net",
