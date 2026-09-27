@@ -66,6 +66,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@loupe/logger": "workspace:*",
+        "@whip/sdk": "workspace:*",
       },
       "devDependencies": {
         "bun-types": "1.3.14",
@@ -88,6 +89,17 @@
       "devDependencies": {
         "bun-types": "1.3.14",
         "vitest": "4.1.10",
+      },
+    },
+    "vendor/@whip/protocol": {
+      "name": "@whip/protocol",
+      "version": "3.0.0",
+    },
+    "vendor/@whip/sdk": {
+      "name": "@whip/sdk",
+      "version": "0.1.0",
+      "dependencies": {
+        "@whip/protocol": "workspace:*",
       },
     },
   },
@@ -367,6 +379,10 @@
     "@vitest/spy": ["@vitest/spy@4.1.10", "", {}, "sha512-PLf/Ugvoq5wO/b4rwYCR1h2PSIdXz7wnkQFMiUpLdtM7l6pqVFcQIBEHyT1+l+cj7mNwAfZHzqXqDyjvOuwbDw=="],
 
     "@vitest/utils": ["@vitest/utils@4.1.10", "", { "dependencies": { "@vitest/pretty-format": "4.1.10", "convert-source-map": "^2.0.0", "tinyrainbow": "^3.1.0" } }, "sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA=="],
+
+    "@whip/protocol": ["@whip/protocol@workspace:vendor/@whip/protocol"],
+
+    "@whip/sdk": ["@whip/sdk@workspace:vendor/@whip/sdk"],
 
     "assertion-error": ["assertion-error@2.0.1", "", {}, "sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA=="],
 

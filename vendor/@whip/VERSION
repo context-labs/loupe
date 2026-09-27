@@ -1,0 +1,4 @@
+source: context-labs/whip v1.0.0 @ 7e8bb75c5
+protocol: 6.8
+built: 2026-09-27T00:06Z
+refresh: task vendor:whip WHIP=<whip checkout>

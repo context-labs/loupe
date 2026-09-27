@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.14",
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/*", "vendor/@whip/*"],
   "scripts": {
     "format": "oxfmt --check \"**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}\"",
     "format:fix": "oxfmt --write \"**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}\"",

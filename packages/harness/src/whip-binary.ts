@@ -1,17 +1,9 @@
 /**
- * Pinned-whip installer - one home for the "whip binary may be missing or
- * renamed" patch logic. Everything loupe needs to run harness "whip" lives
- * here; the harness in index.ts only calls resolveWhipBinary().
- *
- * Background: the upstream whip CLI renamed its binary to `whipcode` at v1.0.0
- * (and its config dir to ~/.whipcode/WHIPCODE_HOME). Environments that install
- * "latest" now have a renamed or missing `whip`, so loupe:
- *   1. identity-checks any `whip` on PATH (`whip --version` must report whip),
- *      rejecting renamings like whipcode masquerading as `whip`;
- *   2. falls back to a pinned release (PINNED_WHIP_TAG), downloaded on demand
- *      into a private cache dir; and
- *   3. single-flights the download so concurrent reviewers inside one loupe
- *      process share a single install instead of racing one another.
+ * Pinned-whip installer: which `whipcode` binary loupe drives. The harness in
+ * index.ts only calls resolveWhipBinary(), which prefers LOUPE_WHIP_BIN, then a
+ * `whipcode` on PATH, then a pinned release (PINNED_WHIP_TAG) downloaded on
+ * demand into a private cache dir. The download is single-flighted so
+ * concurrent reviewers inside one loupe process share one install.
  */
 
 import { spawn } from "node:child_process";
@@ -29,13 +21,11 @@ import { join } from "node:path";
 import type { Logger } from "@loupe/logger";
 
 /**
- * whip v0.6.5 - the pinned release loupe installs on demand. The latest whip
- * release (v1.0.0+) renamed the binary to `whipcode` and broke the harness, so
- * when a user selects harness "whip" and no genuine `whip` is on PATH, loupe
- * downloads this exact tag instead of failing with "CLI is not installed."
- * Bump deliberately when adopting the v1+ whipcode generation.
+ * The whip release loupe installs on demand when no `whipcode` is on PATH.
+ * Pinned so the vendored SDK (vendor/@whip/VERSION) and the daemon it talks to
+ * come from the same release; bump both together.
  */
-export const PINNED_WHIP_TAG = "v0.6.5";
+export const PINNED_WHIP_TAG = "v1.0.0";
 
 /** Minimal logging surface so this module works without a real logger. */
 type WhipLogger = Pick<Logger, "info" | "warn">;
@@ -45,30 +35,19 @@ const noLogger: WhipLogger = {
   warn: () => {},
 };
 
-/**
- * Run `whip --version` and check the binary identifies itself as genuine whip
- * (output starting with "whip v"). The v1.0.0 release renamed the CLI to
- * whipcode, but many CI install steps still download "latest" and save it as
- * `whip` - so a PATH hit may actually be whipcode, which reads a different
- * config dir and rejects loupe's model panel:
- *   whipcode: unknown model "glm-5.3" (models: ...)
- */
-export function isGenuineWhipOnPath(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const p = spawn("whip", ["--version"]);
-    let stdout = "";
-    p.on("error", () => resolve(false));
-    p.on("close", () => resolve(/^\s*whip v/i.test(stdout)));
-    p.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-  });
-}
-
 /** The cache path where the pinned binary lives once installed. */
 export function pinnedWhipPath(): string {
   const home = process.env.HOME ?? tmpdir();
-  return join(home, ".loupe", "bin", "whip");
+  return join(home, ".loupe", "bin", "whipcode");
+}
+
+/** The release asset for this platform (`whipcode-linux-x64` and friends). */
+export function pinnedWhipAsset(
+  platform = process.platform,
+  arch = process.arch,
+): string {
+  const os = platform === "darwin" ? "darwin" : "linux";
+  return `whipcode-${os}-${arch === "arm64" ? "arm64" : "x64"}`;
 }
 
 /** True when a complete, executable binary is already at the cache path. */
@@ -120,19 +99,11 @@ function downloadPinnedWhip(log: WhipLogger): Promise<string | null> {
   const binDir = join(dest, "..");
   mkdirSync(binDir, { recursive: true });
   if (isInstalled(dest)) return Promise.resolve(dest);
-  const mode =
-    process.platform === "darwin" && process.arch === "arm64"
-      ? "darwin-arm64"
-      : process.platform === "darwin"
-        ? "darwin-x64"
-        : process.platform === "linux" && process.arch === "arm64"
-          ? "linux-arm64"
-          : "linux-x64";
-  const url = `https://github.com/context-labs/whip/releases/download/${PINNED_WHIP_TAG}/whip-${mode}`;
+  const url = `https://github.com/context-labs/whip/releases/download/${PINNED_WHIP_TAG}/${pinnedWhipAsset()}`;
   // Unique staging dir per attempt: safe against same-process concurrency and
   // a same-machine second process. Inside binDir so rename stays on one fs.
   const stagingDir = mkdtempSync(join(binDir, ".download-"));
-  const staging = join(stagingDir, "whip");
+  const staging = join(stagingDir, "whipcode");
   return new Promise((resolve) => {
     const cleanup = (): void => {
       try {
@@ -175,20 +146,30 @@ function downloadPinnedWhip(log: WhipLogger): Promise<string | null> {
   });
 }
 
+function onPath(cmd: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const p = spawn("which", [cmd], { stdio: "ignore" });
+    p.on("error", () => resolve(false));
+    p.on("close", (code) => resolve(code === 0));
+  });
+}
+
 /**
  * The one entry point the whip harness uses: resolve which binary to spawn.
- * Prefers a genuine `whip` on PATH (identity-checked), else installs/returns
- * the pinned release from the private cache. Returns null only when neither
- * is possible (no genuine PATH binary and the download failed).
+ * LOUPE_WHIP_BIN wins, then a `whipcode` on PATH, else the pinned release from
+ * the private cache (installed on demand). Returns null only when nothing is
+ * on PATH and the download failed.
  */
 export async function resolveWhipBinary(
   logger: WhipLogger | null,
 ): Promise<string | null> {
-  if (await isGenuineWhipOnPath()) return "whip";
+  const override = process.env.LOUPE_WHIP_BIN;
+  if (override) return override;
+  if (await onPath("whipcode")) return "whipcode";
   const installed = await installPinnedWhip(logger);
-  if (installed && installed !== "whip") {
+  if (installed) {
     logger?.info(
-      `no genuine whip on PATH; using pinned release ${PINNED_WHIP_TAG} from ${installed}`,
+      `no whipcode on PATH; using pinned release ${PINNED_WHIP_TAG} from ${installed}`,
     );
   }
   return installed;

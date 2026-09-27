@@ -1,0 +1,14 @@
+{
+  "name": "@whip/protocol",
+  "version": "3.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./generated/index.d.ts",
+      "import": "./generated/index.js"
+    }
+  },
+  "files": [
+    "generated"
+  ]
+}

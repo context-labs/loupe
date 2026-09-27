@@ -19,5 +19,5 @@
     "^[./]"
   ],
   "sortPackageJson": false,
-  "ignorePatterns": ["**/dist", "**/build"]
+  "ignorePatterns": ["**/dist", "**/build", "**/vendor/**"]
 }

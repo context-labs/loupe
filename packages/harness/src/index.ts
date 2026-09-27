@@ -236,7 +236,7 @@ export function codexHarness(): Harness {
 function runWhipStreaming(
   args: readonly string[],
   ctx: HarnessContext,
-  binary = "whip",
+  binary = "whipcode",
 ): Promise<string> {
   const log = ctx.logger.child("whip");
   // Known secrets (resolved credential values handed to the subprocess via env)
@@ -488,9 +488,8 @@ export function shouldRetryWithoutCacheKey(
  * the provider + model panel instead. `-max-turns` caps the tool loop as a
  * safety net in case the model ignores the headless directive.
  *
- * Binary resolution: the `whip` on PATH wins; if it is absent (e.g. the
- * upstream v1.0.0 rename to `whipcode` removed it), loupe falls back to a
- * pinned release download so harness "whip" keeps working with no user action.
+ * Binary resolution: LOUPE_WHIP_BIN, else `whipcode` on PATH, else the pinned
+ * release (see whip-binary.ts) downloaded on demand.
  */
 export function whipHarness(): Harness {
   return {
@@ -498,7 +497,7 @@ export function whipHarness(): Harness {
     credentialKeys: [],
     available: () => resolveWhipBinary(null).then((b) => b !== null),
     review: async (ctx) => {
-      const binary = (await resolveWhipBinary(ctx.logger)) ?? "whip";
+      const binary = (await resolveWhipBinary(ctx.logger)) ?? "whipcode";
       // Agentic reviews need room to explore the checkout with tools; headless
       // diff-only reviews should answer in one turn, capped as a safety net.
       // The agentic cap is configurable (config.json maxTurns / --max-turns).
