@@ -16,8 +16,6 @@ import {
   type PullRef,
   type ReviewResult,
 } from "@loupe/core";
-import { resolveCredentials } from "@loupe/credentials";
-import { getHarness } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
 import type { Octokit } from "@octokit/rest";
 import { z } from "zod";
@@ -30,6 +28,7 @@ import {
   type ReviewerOutcome,
 } from "./orchestrate";
 import { loadReviewers } from "./reviewers";
+import { resolveHarness } from "./run";
 
 const MENTION = /@loupe\b/i;
 
@@ -179,23 +178,19 @@ async function runFix(
   }
   git(cwd, ["checkout", "-B", headRef, originalHead]);
 
-  const harness = getHarness(config.harnessName);
-  const env = await resolveCredentials(
-    harness.credentialKeys,
-    config.providers,
-  );
+  const harness = await resolveHarness({ ...config, logger });
   const pull = await fetchPullContext(octokit, ref);
-  logger.info("Fix: running agentic harness", { chars: instruction.length });
+  logger.info("Fix: running the fixer agent", { chars: instruction.length });
   await harness.review({
+    agent: "fixer",
     systemPrompt: buildFixSystemPrompt(),
     userPrompt: findings
       ? buildFixFindingsUserPrompt(findings, pull.files)
       : buildFixUserPrompt(instruction, pull.files),
     model: config.model,
+    provider: config.whipConfig?.provider.name,
     agentic: true,
     workdir: cwd,
-    env,
-    whipConfig: config.whipConfig,
     maxTurns: config.maxTurns,
     reasoning: config.reasoning,
     cacheKey:
@@ -425,20 +420,16 @@ export async function handleComment(
   // Free-form question → answer from the diff.
   logger.info("Chat question", { chars: instruction.length });
   try {
-    const harness = getHarness(config.harnessName);
-    const env = await resolveCredentials(
-      harness.credentialKeys,
-      config.providers,
-    );
+    const harness = await resolveHarness({ ...config, logger });
     const pull = await fetchPullContext(octokit, ref);
-    const stdout = await harness.review({
+    const { text: stdout } = await harness.review({
+      agent: "chat",
       systemPrompt: buildChatSystemPrompt(),
       userPrompt: buildChatUserPrompt(instruction, pull.files),
       model: config.model,
+      provider: config.whipConfig?.provider.name,
       agentic: false,
       workdir: config.workdir,
-      env,
-      whipConfig: config.whipConfig,
       maxTurns: config.maxTurns,
       reasoning: config.reasoning,
       cacheKey:

@@ -73,9 +73,10 @@ const configSchema = z.object({
   /** Skills applied to every reviewer (merged with each reviewer's own). */
   skills: z.array(z.string()).optional(),
   // Top-level review defaults. Action inputs / CLI flags override these; these
-  // in turn override loupe's built-in defaults. Keeps harness/model/timezone/dir
-  // with the repo's review policy instead of duplicated across workflow files.
-  harness: z.string().optional(),
+  // in turn override loupe's built-in defaults. Keeps model/timezone/dir with
+  // the repo's review policy instead of duplicated across workflow files.
+  /** Accepted for older configs; whip is the only harness. */
+  harness: z.literal("whip").optional(),
   model: z.string().optional(),
   reasoning: z.enum(["low", "medium", "high"]).optional(),
   profile: z.enum(["quiet", "chill", "assertive"]).optional(),
@@ -95,7 +96,7 @@ const configSchema = z.object({
 /** The top-level, non-reviewer settings from a .loupe.json — review defaults a
  * repo declares once instead of repeating them in every workflow file. */
 export type LoupeSettings = {
-  readonly harness?: string;
+  readonly harness?: "whip";
   readonly model?: string;
   readonly reasoning?: ReasoningEffort;
   readonly profile?: Profile;

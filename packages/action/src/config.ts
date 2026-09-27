@@ -120,14 +120,13 @@ export type Config = {
   readonly owner: string;
   readonly repo: string;
   readonly pullNumber: number;
-  readonly harnessName: string;
   readonly workdir: string;
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
   /** Directories in scope; several are reviewed together from the repo root. */
   readonly dirs?: readonly string[];
   readonly model: string;
-  /** Unset = harness default effort and no reasoning note in the prompt. */
+  /** Unset = whip's default effort and no reasoning note in the prompt. */
   readonly reasoning?: ReasoningEffort;
   readonly guidance?: string;
   readonly configPath?: string;
@@ -167,13 +166,21 @@ export function loadConfig(): Config {
   // Top-level review defaults from .loupe.json. Precedence for the movable
   // settings: Action input (explicit) → file → loupe's built-in default.
   const file: LoupeSettings = configPath ? loadSettings(configPath) : {};
+  // loupe is whip-only. `harness: "whip"` in a .loupe.json and a `harness`
+  // input of "whip" are still accepted so existing configs keep working; any
+  // other value names a harness loupe no longer has.
+  const harness = env.LOUPE_HARNESS ?? file.harness;
+  if (harness !== undefined && harness !== "whip") {
+    throw new Error(
+      `Unknown harness "${harness}": loupe reviews through whip only. Remove the harness setting or set it to "whip".`,
+    );
+  }
 
   return {
     token: env.GITHUB_TOKEN,
     owner,
     repo,
     pullNumber: resolvePullNumber(env.LOUPE_PR_NUMBER, env.GITHUB_EVENT_PATH),
-    harnessName: env.LOUPE_HARNESS ?? file.harness ?? "whip",
     workdir,
     conventionPaths: env.LOUPE_CONVENTION_PATHS.split(",")
       .map((p) => p.trim())

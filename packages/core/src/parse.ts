@@ -24,6 +24,20 @@ function parseLenient(text: string): unknown {
   }
 }
 
+/**
+ * The text a turn's outcome is parsed from. Under an output contract the
+ * daemon hands back the validated value, so its JSON is what gets parsed;
+ * when a turn ends without one (no contract, or the turn cap forced a final
+ * answer past the check) the final message is parsed as before, so salvage
+ * and the malformed counts keep working on that path.
+ */
+export function outcomeText(outcome: {
+  readonly text: string;
+  readonly output: unknown;
+}): string {
+  return outcome.output != null ? JSON.stringify(outcome.output) : outcome.text;
+}
+
 /** A parsed review plus what the parser had to discard to produce it. */
 export type ParsedReview = {
   readonly review: ReviewOutput;

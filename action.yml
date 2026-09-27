@@ -1,5 +1,5 @@
 name: "loupe"
-description: "AI PR reviewer that posts inline comments, harness-agnostic, reads your repo's own conventions."
+description: "AI PR reviewer that posts inline comments, runs on whip, reads your repo's own conventions."
 branding:
   icon: "search"
   color: "purple"
@@ -8,19 +8,19 @@ inputs:
     description: "Token used to read the PR and post the review."
     required: true
     default: ${{ github.token }}
-  # harness/model/reasoning/profile/timezone/dir default to empty so a value in
+  # model/reasoning/profile/timezone/dir default to empty so a value in
   # .loupe.json wins; set an input here only to override the file. Built-in
-  # fallbacks (whip / kimi-k3 / harness-default effort / chill / UTC) apply when neither is set.
+  # fallbacks (kimi-k3 / whip's default effort / chill / UTC) apply when neither is set.
   harness:
-    description: "Which agent CLI to review with (whip, claude, codex). Overrides .loupe.json; default whip."
+    description: "Deprecated: loupe reviews through whip only. Accepted as \"whip\" for older workflows; leave empty."
     required: false
     default: ""
   model:
-    description: "Model id for the harness (e.g. kimi-k3, claude-opus-4-8). Overrides .loupe.json; default kimi-k3."
+    description: "Model id (e.g. kimi-k3, glm-5.3). Overrides .loupe.json; default kimi-k3."
     required: false
     default: ""
   reasoning:
-    description: "Reasoning effort: low, medium, or high, passed to the harness natively. Overrides .loupe.json; unset = the harness's own default."
+    description: "Reasoning effort: low, medium, or high, set on each whip session. Overrides .loupe.json; unset = whip's own default."
     required: false
     default: ""
   prompt-file:

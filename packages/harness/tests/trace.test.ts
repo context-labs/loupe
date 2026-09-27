@@ -1,103 +1,91 @@
 import { describe, expect, it } from "vitest";
 
+import type { TurnEvent } from "@whip/sdk";
+
 import {
   envSecretValues,
   redactSecrets,
   REDACTION_MARK,
-  whipEventToTrace,
-  type HarnessTraceEvent,
+  turnEventToTrace,
 } from "../src/index";
 
-describe("whipEventToTrace (nondestructive normalization)", () => {
+const event = (fields: Record<string, unknown>): TurnEvent =>
+  ({
+    seq: "1",
+    agentId: "root",
+    turnId: "t1",
+    ...fields,
+  }) as unknown as TurnEvent;
+
+describe("turnEventToTrace (nondestructive normalization)", () => {
   it("translates reasoning and text deltas", () => {
-    expect(whipEventToTrace({ type: "reasoning", delta: "think " })).toEqual([
-      { type: "reasoning", delta: "think " },
-    ]);
-    expect(whipEventToTrace({ type: "text", delta: "hi" })).toEqual([
+    expect(
+      turnEventToTrace(event({ type: "reasoning", delta: "think " })),
+    ).toEqual([{ type: "reasoning", delta: "think " }]);
+    expect(turnEventToTrace(event({ type: "text", delta: "hi" }))).toEqual([
       { type: "text", delta: "hi" },
     ]);
   });
 
-  it("normalizes tool_start/tool_end with truncated blobs", () => {
+  it("maps a host call to tool_start/tool_end with truncated blobs", () => {
     const long = "x".repeat(5000);
-    const start = whipEventToTrace({
-      type: "tool_start",
-      name: "read",
-      args: long,
-    });
-    expect(start).toEqual([
-      { type: "tool_start", name: "read", args: long.slice(0, 2000) },
-    ]);
-    const end = whipEventToTrace({
-      type: "tool_end",
-      name: "read",
-      result: long,
-    });
-    expect(end).toEqual([
-      { type: "tool_end", name: "read", result: long.slice(0, 2000) },
-    ]);
-  });
-
-  it("serializes structured tool results", () => {
     expect(
-      whipEventToTrace({
-        type: "tool_end",
-        name: "read",
-        result: { lines: ["one", "two"], truncated: false },
-      }),
-    ).toEqual([
-      {
-        type: "tool_end",
-        name: "read",
-        result: '{"lines":["one","two"],"truncated":false}',
-      },
-    ]);
-  });
-
-  it("handles circular tool payloads without throwing", () => {
-    const circular: Record<string, unknown> = {};
-    circular["self"] = circular;
-    expect(
-      whipEventToTrace({ type: "tool_start", name: "custom", args: circular }),
+      turnEventToTrace(
+        event({
+          type: "host",
+          id: "h1",
+          invocationId: "i",
+          operation: "files.read",
+          summary: long,
+          status: "running",
+        }),
+      ),
     ).toEqual([
       {
         type: "tool_start",
-        name: "custom",
-        args: "[unserializable tool payload]",
+        name: "files.read",
+        args: `${long.slice(0, 2000)}…`,
       },
     ]);
-  });
-
-  it("defaults a missing tool name and serializes structured args", () => {
-    expect(whipEventToTrace({ type: "tool_start" })).toEqual([
-      { type: "tool_start", name: "tool", args: undefined },
-    ]);
     expect(
-      whipEventToTrace({ type: "tool_start", name: "grep", args: { x: 1 } }),
-    ).toEqual([{ type: "tool_start", name: "grep", args: '{"x":1}' }]);
+      turnEventToTrace(
+        event({
+          type: "host",
+          id: "h1",
+          invocationId: "i",
+          operation: "files.read",
+          summary: "",
+          status: "failed",
+          error: "denied",
+        }),
+      ),
+    ).toEqual([{ type: "tool_end", name: "files.read", result: "denied" }]);
   });
 
-  it("ignores non-object raw events", () => {
-    expect(whipEventToTrace(null)).toEqual([]);
-    expect(whipEventToTrace("reasoning")).toEqual([]);
+  it("maps a cell's code and result to a tool", () => {
+    expect(
+      turnEventToTrace(
+        event({ type: "cell", id: "c1", status: "running", code: "x = 1" }),
+      ),
+    ).toEqual([{ type: "tool_start", name: "cell", args: "x = 1" }]);
+    expect(
+      turnEventToTrace(
+        event({ type: "cell", id: "c1", status: "completed", result: "1" }),
+      ),
+    ).toEqual([{ type: "tool_end", name: "cell", result: "1" }]);
+    expect(
+      turnEventToTrace(event({ type: "cell", id: "c1", status: "called" })),
+    ).toEqual([]);
   });
 
-  it("normalizes done and error", () => {
-    expect(whipEventToTrace({ type: "done", text: "{}" })).toEqual([
-      { type: "done", text: "{}" },
-    ]);
-    const err = whipEventToTrace({
-      type: "error",
-      error: { message: "boom" },
-    })[0] as HarnessTraceEvent & { type: "error" };
-    expect(err.type).toBe("error");
-    expect(err.error).toContain("boom");
-  });
-
-  it("ignores unknown event types and malformed payloads", () => {
-    expect(whipEventToTrace({ type: "ping" })).toEqual([]);
-    expect(whipEventToTrace({ type: "reasoning" })).toEqual([]);
-    expect(whipEventToTrace({ type: "text", delta: 42 })).toEqual([]);
+  it("ignores events the trace has no shape for", () => {
+    expect(turnEventToTrace(event({ type: "notice", text: "n" }))).toEqual([]);
+    expect(
+      turnEventToTrace(event({ type: "end", status: "succeeded" })),
+    ).toEqual([]);
+    expect(
+      turnEventToTrace(event({ type: "raw", event: { kind: "x" } })),
+    ).toEqual([]);
   });
 });
 

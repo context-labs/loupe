@@ -8,7 +8,12 @@ import { Command } from "commander";
 
 import { resolveProviders } from "./config";
 import { asDirs, loadReviewers, loadSettings } from "./reviewers";
-import { formatResult, renderReview, reviewPullRequest } from "./run";
+import {
+  formatResult,
+  releaseWhip,
+  renderReview,
+  reviewPullRequest,
+} from "./run";
 
 const REASONING: readonly ReasoningEffort[] = ["low", "medium", "high"];
 const PRIOR_COMMENTS: readonly PriorComments[] = ["resolve", "delete", "keep"];
@@ -81,11 +86,10 @@ program
   .command("review")
   .description("Review a pull request and post inline comments")
   .argument("<pr>", "PR URL (github.com/owner/repo/pull/N) or owner/repo#N")
-  .option("-H, --harness <name>", "agent CLI to review with (default whip)")
-  .option("-m, --model <name>", "model id for the harness (default kimi-k3)")
+  .option("-m, --model <name>", "model id (default kimi-k3)")
   .option(
     "-r, --reasoning <level>",
-    "reasoning effort: low|medium|high (default: harness default)",
+    "reasoning effort: low|medium|high (default: whip's own default)",
   )
   .option(
     "--prompt-file <path>",
@@ -95,7 +99,7 @@ program
   .option("-t, --token <token>", "GitHub token (else GITHUB_TOKEN or gh)")
   .option(
     "-w, --workdir <dir>",
-    "repo checkout the harness may read",
+    "repo checkout the reviewer may read",
     process.cwd(),
   )
   .option(
@@ -168,7 +172,6 @@ program
     async (
       pr: string,
       opts: {
-        harness?: string;
         model?: string;
         reasoning?: string;
         promptFile?: string;
@@ -201,7 +204,6 @@ program
         // Top-level review defaults from .loupe.json; a flag overrides the file,
         // the file overrides loupe's built-in default.
         const settings = opts.config ? loadSettings(opts.config) : {};
-        const harnessName = opts.harness ?? settings.harness ?? "whip";
         const model = opts.model ?? settings.model ?? "kimi-k3";
         const reasoningRaw = opts.reasoning ?? settings.reasoning;
         const reasoning = reasoningRaw
@@ -238,7 +240,6 @@ program
           owner,
           repo,
           pullNumber,
-          harnessName,
           workdir: opts.workdir,
           conventionPaths: opts.conventions
             .split(",")
@@ -329,6 +330,7 @@ program
         logger.info(formatResult(result));
         if (opts.dryRun) console.log(renderReview(result));
       } finally {
+        await releaseWhip();
         await shutdownLogger();
       }
     },

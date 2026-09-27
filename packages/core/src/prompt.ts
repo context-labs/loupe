@@ -95,8 +95,8 @@ Procedure — do these before writing any finding:
    change too.
 3. NEVER assert that something is missing, absent, not created, not updated,
    not imported, not registered, not called, or not handled without CONFIRMING
-   it against the real checkout first — \`ls\` the directory, \`cat\`/grep the
-   file, read the sibling files. The diff is not the filesystem: on an
+   it against the real checkout first — list the directory, read or search
+   the file, read the sibling files. The diff is not the filesystem: on an
    incremental run it shows only what changed since the last review, so a file
    or edit that is NOT in the diff may still exist on disk from an earlier
    commit. "Missing snapshot.json", "head file not updated", "no test added",
@@ -164,10 +164,9 @@ migrations, model and query code, and existing indexes/constraints the diff
 interacts with. Ground each finding in what you actually found, not a guess.
 
 Your tool budget is limited. Spend it on the change's callers and contracts
-first. Use subagents when several independent investigations would otherwise run
-serially; do not spawn them for a single grep. If you suspect a blocker and have
-budget left, get one independent confirmation before reporting it. When you have
-what you need, STOP and respond with ONLY the final JSON object.`.trim();
+first. If you suspect a blocker and have budget left, get one independent
+confirmation before reporting it. When you have what you need, STOP and respond
+with ONLY the final JSON object.`.trim();
 
 const REASONING_NOTE: Record<ReasoningEffort, string> = {
   low: "Reasoning effort: low. Do a quick pass; flag only obvious, high-confidence issues.",
@@ -307,7 +306,7 @@ export function buildUserPrompt(input: UserPromptInput): string {
     ? [
         "Changed files (the full diff is NOT inlined — explore it yourself):",
         renderFileTree(input.files),
-        `The complete unified diff is written to \`${input.diffPath}\`. For each file you review, read its hunks from that file (e.g. with grep/sed by the \`### <path>\` header) and inspect the surrounding code in the checkout. Read only what the change touches — do not read the whole diff up front.`,
+        `The complete unified diff is written to \`${input.diffPath}\`. For each file you review, read its hunks from that file (search it for the \`### <path>\` header, then read from there; a large file comes back as a {handle, preview, size} object you read with context.read) and inspect the surrounding code in the checkout. Read only what the change touches — do not read the whole diff up front.`,
       ].join("\n\n")
     : ["Diff under review:", renderDiff(input.files)].join("\n\n");
   return [
