@@ -4,7 +4,7 @@ import { scriptedDaemon, type ScriptedDaemon } from "@whip/sdk/testing";
 import { describe, expect, it } from "vitest";
 
 import { reviewerAgent } from "../src/agents";
-import { runAgent, serveAgent } from "../src/client";
+import { discoverModels, runAgent, serveAgent } from "../src/client";
 import { z } from "zod";
 
 const output = z.object({ ok: z.boolean() });
@@ -256,5 +256,62 @@ describe("runAgent", () => {
     await played;
     client.close();
     expect(commands(daemon).at(-1)?.operation).toBe("session.delete");
+  });
+});
+
+describe("discoverModels", () => {
+  const catalogs = (models: { id: string }[], error?: string) => ({
+    models: {},
+    providers: {
+      "inference-net": { base_url: "https://api.inference.net/v1" },
+    },
+    catalogs: {
+      "inference-net": {
+        fetched_at: "2026-09-26T00:00:00Z",
+        base_url: "https://api.inference.net/v1",
+        models,
+      },
+    },
+    errors: error ? { "inference-net": error } : {},
+  });
+  /** Queries ride the `query` method with the operation inside. */
+  const answering = (models: { id: string }[], error?: string) =>
+    scriptedDaemon().reply("query", (request) =>
+      request.params["operation"] === "provider.catalogs"
+        ? { result: catalogs(models, error) }
+        : undefined,
+    );
+
+  it("asks the daemon for the provider's catalog and logs what it found", async () => {
+    const daemon = answering([{ id: "glm-5.3" }, { id: "kimi-k3" }]);
+    const client = await connected(daemon);
+    const { log, lines } = recorder();
+    await discoverModels(client, "inference-net", log);
+    client.close();
+    const request = daemon.current.requests.find(
+      (r) => r.params["operation"] === "provider.catalogs",
+    );
+    expect(request?.params).toMatchObject({
+      operation: "provider.catalogs",
+      payload: { provider: "inference-net" },
+    });
+    expect(lines.at(-1)).toMatchObject({
+      level: "debug",
+      message: "provider models discovered",
+      props: { provider: "inference-net", models: ["glm-5.3", "kimi-k3"] },
+    });
+  });
+
+  it("warns, and goes on, when discovery fails or finds nothing", async () => {
+    const daemon = answering(
+      [],
+      "Model discovery failed; check the provider connection and retry.",
+    );
+    const client = await connected(daemon);
+    const { log, lines } = recorder();
+    await discoverModels(client, "inference-net", log);
+    client.close();
+    expect(lines.at(-1)?.level).toBe("warn");
+    expect(lines.at(-1)?.props?.["error"]).toMatch(/Model discovery failed/);
   });
 });

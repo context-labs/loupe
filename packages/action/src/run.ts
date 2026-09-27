@@ -21,6 +21,7 @@ import {
 } from "@loupe/credentials";
 import {
   connect,
+  discoverModels,
   ensureDaemon,
   envSecretValues,
   whipHarness,
@@ -112,6 +113,11 @@ async function bringUp(opts: WhipOptions): Promise<Whip> {
     logger: opts.logger,
   });
   const client = await connect(daemon, opts.logger);
+  // A dedicated daemon in a throwaway home starts without a model catalog;
+  // the same call is a cheap no-op on a daemon that already has one.
+  if (opts.whipConfig) {
+    await discoverModels(client, opts.whipConfig.provider.name, opts.logger);
+  }
   // Known secrets (the resolved credential values handed to the daemon) are
   // scrubbed from every trace payload so an API key that surfaces in a tool
   // result or reasoning chunk never lands in the summary.

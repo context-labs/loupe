@@ -35,6 +35,46 @@ export async function connect(
   return client;
 }
 
+/**
+ * Make sure the daemon knows the provider's models. A daemon started from a
+ * hand-written home has no model catalog until a client asks for one (the
+ * desktop app does that itself), and without it every model's limits collapse
+ * to a one-token output cap, so each turn ends with an empty final message.
+ * Cheap on a daemon that already has one: it refetches only a missing or
+ * stale catalog. Discovery failing is a warning; the turn's own failure says
+ * the rest.
+ */
+export async function discoverModels(
+  client: WhipClient,
+  provider: string,
+  logger: Logger,
+): Promise<void> {
+  const log = logger.child("whip");
+  const outcome = await client.providers.catalogs({ provider });
+  const result = outcome.result;
+  const catalog = result?.catalogs[provider];
+  const errors =
+    (result as { errors?: Record<string, string> } | undefined)?.errors ?? {};
+  if (!result || errors[provider] || !catalog?.models?.length) {
+    log.warn(
+      "model discovery failed; the daemon does not know the provider's models, so requests will be capped at one output token",
+      {
+        provider,
+        error:
+          errors[provider] ??
+          (outcome as { failure?: { message?: string } }).failure?.message ??
+          "no catalog in the reply",
+      },
+    );
+    return;
+  }
+  log.debug("provider models discovered", {
+    provider,
+    models: catalog.models.map((m: { id: string }) => m.id),
+    fetchedAt: catalog.fetched_at,
+  });
+}
+
 /** How one session on a served agent is set up. */
 export type SessionParams = {
   /** Working directory the session's host modules operate in. */

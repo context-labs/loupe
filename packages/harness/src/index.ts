@@ -32,7 +32,7 @@ export {
   resolveWhipBinary,
 } from "./daemon";
 export type { DaemonHandle, WhipConfig } from "./daemon";
-export { connect, runAgent, serveAgent } from "./client";
+export { connect, discoverModels, runAgent, serveAgent } from "./client";
 export type {
   AgentRun,
   RunOutcome,
