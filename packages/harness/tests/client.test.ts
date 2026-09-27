@@ -116,6 +116,48 @@ describe("runAgent", () => {
     expect(lines.at(-1)?.message).toBe("run finished");
   });
 
+  it("keeps going when the model has no such effort level, and says so", async () => {
+    const daemon = scriptedDaemon()
+      .serveSessions()
+      .reply("command.submit", (request) =>
+        request.params["operation"] === "session.effort"
+          ? {
+              operation: "session.effort",
+              command_id: String(request.params["command_id"]),
+              ingress_seq: "901",
+              status: "failed",
+              failure: {
+                code: -32000,
+                message: 'glm-5.3 does not support effort "medium"',
+              },
+            }
+          : undefined,
+      );
+    const client = await connected(daemon);
+    const { log, lines } = recorder();
+    const played = daemon.turn("root-1", { text: "ok", output: { ok: true } });
+    const outcome = await runAgent(client, {
+      agent: reviewerAgent({
+        name: "t",
+        systemPrompt: "p",
+        agentic: true,
+        output,
+      }),
+      cwd: "/repo",
+      prompt: "review",
+      effort: "medium",
+      logger: log,
+    });
+    await played;
+    client.close();
+    expect(outcome.output).toEqual({ ok: true });
+    const warning = lines.find((l) => l.level === "warn");
+    expect(warning?.message).toBe(
+      "reasoning effort not applied; the model's default applies",
+    );
+    expect(warning?.props?.["error"]).toMatch(/does not support effort/);
+  });
+
   it("only registers an agent without tools or hooks and still runs it", async () => {
     const daemon = scriptedDaemon().serveSessions();
     const client = await connected(daemon);

@@ -184,10 +184,19 @@ export async function serveAgent(
       if (configured.status !== "succeeded") {
         throw failed("run.configure", configured);
       }
+      // Reasoning effort is advisory: a model that has no such effort level
+      // (the daemon says so) keeps its own default, as it did under `whip run`.
       if (params.effort) {
         const effort = await session.setEffort(params.effort, false).result();
-        if (effort.status !== "succeeded")
-          throw failed("session.effort", effort);
+        if (effort.status !== "succeeded") {
+          log.warn(
+            "reasoning effort not applied; the model's default applies",
+            {
+              effort: params.effort,
+              error: effort.failure?.message ?? effort.status,
+            },
+          );
+        }
       }
       return {
         rootId: session.rootId,
