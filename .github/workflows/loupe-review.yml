@@ -60,7 +60,9 @@ jobs:
           include-imports: true
       - name: Review
         continue-on-error: true
-        uses: context-labs/loupe@main
+        # The checked-out loupe reviews the PR, so a change to loupe is
+        # exercised by its own self-review. On main this is the same as @main.
+        uses: ./
         with:
           config: .loupe/config.json
         env:
