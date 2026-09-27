@@ -15,21 +15,21 @@ This page expands the **Build context and run agent** box in [A review run](./re
 
 ## System prompt, in order
 
-Order matters for caching. Everything here is identical across PRs for a given reviewer, so the provider reuses the cached prefix. `-cache-key loupe/<owner>/<repo>/<reviewer>` names that prefix. The key is on by default; set `promptCache: false` (the `prompt-cache` Action input / `--no-prompt-cache` flag) for a reviewer whose model rejects `prompt_cache_key` — those models cache the prefix automatically by match, so the key is redundant. If the provider 400s on the key, the whip harness also self-heals by retrying once without it.
+Order matters for caching. Everything here is identical across PRs for a given reviewer, so the provider reuses the cached prefix. The session's `cache_key`, `loupe/<owner>/<repo>/<reviewer>`, names that prefix. The key is on by default; set `promptCache: false` (the `prompt-cache` Action input / `--no-prompt-cache` flag) for a reviewer whose model rejects `prompt_cache_key` — those models cache the prefix automatically by match, so the key is redundant.
 
 1. **Guidance.** The reviewer's `prompt` or `promptFile`, verbatim. It replaces loupe's default guidance when set.
 2. **Procedure.** Always appended, even under custom guidance: locate and read the callers of every changed export before judging, follow thin wrappers one more hop, treat a newly interactive or blocking call inside a spinner or other terminal-owning wrapper as a defect. `procedure: false` removes it.
 3. **Skills.** Each path in `skills` is read from the checkout. A directory means its `SKILL.md`. A missing skill logs a warning and is skipped.
 4. **Conventions.** Every convention doc that exists at the PR head, concatenated under `# <path>` headers. Fetched via the GitHub API, not the checkout.
-5. **Reasoning note.** One sentence, only when `reasoning` is configured. The same value goes to the harness natively.
+5. **Reasoning note.** One sentence, only when `reasoning` is configured. The same value is set on the whip session.
 6. **Profile directive.** Which severities to report.
-7. **Tool directive.** Agentic: you have the checkout, read hunks from the diff file on demand, spend the turn budget on callers and contracts first, use subagents only for genuinely parallel work, then stop and emit JSON. Headless (retry, chat): no tools, diff is inline. The verify pass uses the agentic directive when the review was agentic and a checkout exists, else the headless directive.
-8. **Output contract.** One JSON object, not wrapped in a code fence: `summary`, `concerns[]`, `highlights[]`, optional `diagram`, `findings[]` with `path`, `line` (new-file line, must be in the diff), `severity`, `body`. `summary`, `detail`, and `body` are GitHub Markdown and may hold paragraphs and fenced code blocks.
+7. **Tool directive.** Agentic: you have the checkout, read hunks from the diff file on demand, spend the turn budget on callers and contracts first, then stop and emit JSON. Headless (retry, chat): no tools, diff is inline. The verify pass uses the agentic directive when the review was agentic and a checkout exists, else the headless directive.
+8. **Output contract.** One JSON object, not wrapped in a code fence (the same schema is the reviewer definition's output contract, which the daemon validates the final message against): `summary`, `concerns[]`, `highlights[]`, optional `diagram`, `findings[]` with `path`, `line` (new-file line, must be in the diff), `severity`, `body`. `summary`, `detail`, and `body` are GitHub Markdown and may hold paragraphs and fenced code blocks.
 
 ## User message
 
 - Environment line with the current date and time in the configured `timezone`.
-- When `dir` names one directory and the harness runs inside it: "Your working directory is `<dir>/` inside the repository. Listed paths are repository-relative; drop the prefix when opening files, report `path` exactly as listed." With several directories the harness runs at the repo root and no note is needed.
+- When `dir` names one directory and the agent runs inside it: "Your working directory is `<dir>/` inside the repository. Listed paths are repository-relative; drop the prefix when opening files, report `path` exactly as listed." With several directories the agent runs at the repo root and no note is needed.
 - PR title and body.
 - `pathInstructions` whose glob matches at least one reassessed file, one bullet each.
 - On an incremental run: "Files to reassess", then "the other listed files are context".

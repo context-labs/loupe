@@ -18,7 +18,7 @@ all outcomes have completed.
 For every reviewer (or the single default review), the summary gets one section
 (`### \`<reviewer>\``) containing:
 
-- **metadata** — the harness (`whip`, `claude`, …), model, and phase labels
+- **metadata** — the harness (`whip`), model, and phase labels
   (`primary`, `fallback`, `ensemble:<model>`, `verify`) carried on the events,
   when present;
 - **reasoning** — a collapsed `<details>` block with the total reasoning char
@@ -33,12 +33,12 @@ For every reviewer (or the single default review), the summary gets one section
 Output is **bounded**: tool args/results and reply blobs are truncated, reasoning
 is head-only, each reviewer section and the whole file have a character cap. The
 step summary is free of unbounded dumps; "full detail is in the job logs" is
-real, because the harness's raw stderr/stdout and structured events are still
-logged as before.
+real, because the run log (cells, host calls, hook decisions, cost) still
+carries everything.
 
-Known **secrets don't leak**: the harness hands the resolved credential values
-(e.g. `ANTHROPIC_API_KEY`) to the subprocess via its env, and those exact values
-are scrubbed (`[REDACTED]`) from any reasoning delta, tool arg/result or reply
+Known **secrets don't leak**: the credential values loupe resolves for the
+daemon (e.g. `INFERENCE_API_KEY`) and every secret-looking variable in the
+daemon's environment are scrubbed (`[REDACTED]`) from any reasoning delta, tool arg/result or reply
 text before it reaches the summary. Values shorter than the noise floor are left
 alone, so nothing important is needlessly removed.
 
@@ -46,14 +46,14 @@ Escaping keeps the summary valid Markdown even when a tool returns backticks,
 angles, or hashes: blob content is placed in fenced blocks and backticks are
 escaped so they cannot close an unrelated fence.
 
-### Non-Whip harnesses
+### Where the events come from
 
-The reasoning/tool transcript comes from **whip's** structured NDJSON event log.
-If a reviewer runs a different harness (`claude`, `codex`), that log doesn't
-exist, so its section carries no per-step detail — instead it states **explicitly
-that detailed reasoning and per-tool traces are Whip-only** and that the reviewer
-ran the non-whip harness by name, so the note is never mistaken for a run that
-silently produced nothing. The final `done`/`error` result still renders.
+The transcript is whip's typed turn events (`session.run` in the SDK), mapped by
+`turnEventToTrace`: reasoning and text deltas as they stream, each cell (the
+model's code) and host call (a module operation) as a tool call with its result,
+then `done` with the final message or `error` with the failure. Every reviewer
+runs on whip, so every section carries the transcript; the renderer's note for
+another harness name is only a guard.
 
 ## When it runs
 
@@ -76,7 +76,7 @@ Pointing `GITHUB_STEP_SUMMARY` at a scratch file is enough to make the Action
 append its trace there on a normal run (pull_request or `@loupe review`).
 
 To eyeball the exact summary output offline — no checkout, no harness, no model —
-a **fixture preview** renders realistic whip/ensemble/error/non-whip reviewer
+a **fixture preview** renders realistic whip/ensemble/error reviewer
 traces and writes them to a path (plain file write, never `GITHUB_STEP_SUMMARY`):
 
 ```bash
@@ -85,7 +85,7 @@ bun run trace:preview /tmp/trace.md  # write to a file
 ```
 
 To sanity-check the rendering, the unit tests exercise the renderer and writer
-directly (`packages/action/tests/trace.test.ts`), and the harness's raw-event →
+directly (`packages/action/tests/trace.test.ts`), and the harness's turn-event →
 normalized-event mapping plus secret scrubbing is covered by
 `packages/harness/tests/trace.test.ts`:
 
@@ -95,7 +95,7 @@ bun run test
 
 ## Architecture boundaries
 
-- `@loupe/harness` owns **capture/normalization** — the whip NDJSON event log is
+- `@loupe/harness` owns **capture/normalization** — whip's typed turn events are
   mapped to the normalized `HarnessTraceEvent` union and emitted through the
   optional `HarnessContext.trace` callback. It also scrubs the run's known
   credential values from every emitted payload. Nothing here knows about GitHub.

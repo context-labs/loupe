@@ -1,5 +1,4 @@
 {
-  "harness": "whip",
   "model": "kimi-k3",
   "timezone": "PST",
   "dir": "inference",

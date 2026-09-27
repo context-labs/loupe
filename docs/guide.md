@@ -6,7 +6,9 @@
 2. Filters the files to each reviewer's scope (subdir + globs).
 3. Builds a system prompt (reviewer guidance + reasoning + tool directive +
    JSON output contract) and a user prompt (PR metadata + conventions + diff).
-4. Runs a harness (an agent CLI) to produce findings as JSON.
+4. Runs the reviewer as a whip agent (one turn on the whip daemon, through
+   its SDK) whose final message is the review JSON, validated by the daemon
+   against the review schema.
 5. Validates each finding's `path:line` against the diff — off-diff findings
    degrade to summary notes so a bad line never rejects the review.
 6. Posts inline findings in an empty-body review and creates or updates one
@@ -19,13 +21,15 @@
 bun install
 ```
 
-Requires [Bun](https://bun.sh) 1.3.14 and a harness CLI on `PATH` (default:
-[whip](https://github.com/context-labs/whip); also `claude`, `codex`).
+Requires [Bun](https://bun.sh) 1.3.14 and
+[whip](https://github.com/context-labs/whip)'s `whipcode` binary: on `PATH`,
+named by `LOUPE_WHIP_BIN`, or downloaded by loupe itself (the pinned release in
+`vendor/@whip/VERSION`) when neither exists.
 
 ## Run a review locally
 
 ```bash
-# defaults: whip harness, kimi-k3, harness-default reasoning effort, agentic
+# defaults: kimi-k3, whip's default reasoning effort, agentic
 bun run packages/action/src/cli.ts review owner/repo#123
 
 # PR URL also works
@@ -47,9 +51,8 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `-H, --harness <name>` | `whip` | Agent CLI: `whip`, `claude`, `codex`. |
-| `-m, --model <name>` | `kimi-k3` | Model id passed to the harness. |
-| `-r, --reasoning <level>` | harness default | `low` \| `medium` \| `high`, passed to the harness natively. |
+| `-m, --model <name>` | `kimi-k3` | Model id the reviewer runs on. |
+| `-r, --reasoning <level>` | whip default | `low` \| `medium` \| `high`, set on the whip session. |
 | `--prior-comments <policy>` | `resolve` | Prior inline comments on re-review: `resolve` \| `delete` \| `keep`. |
 | `--max-turns <n>` | `10` | Cap on the agentic tool loop. |
 | `--max-comments <n>` | `10` | Max inline comments per review; extras are ranked by severity into a collapsed summary section. |
@@ -66,7 +69,7 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 | `--prompt-file <path>` | — | Custom reviewer guidance (single-reviewer mode). |
 | `-c, --conventions <paths>` | `CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md` | Repo docs to enforce. |
 | `-p, --providers <spec>` | `env,dotenv` | Credential provider chain. |
-| `-w, --workdir <dir>` | cwd | Repo checkout the harness may explore. |
+| `-w, --workdir <dir>` | cwd | Repo checkout the reviewer may explore. |
 | `--dry-run` | off | Compute + print, do not post. |
 | `-t, --token <token>` | — | GitHub token override. |
 | `--infisical-env`, `--infisical-project` | — | Infisical provider options. |

@@ -39,7 +39,7 @@ flowchart TD
 ## Job setup (both workflows)
 
 1. `actions/checkout`. The review workflow lands on the PR merge ref. A comment-triggered chat workflow starts from the default branch; `@loupe fix` fetches and checks out the PR head branch before the agent edits it.
-2. Install the harness CLI (`whip`, `claude`, or `codex`).
+2. Install `whipcode` (the release pinned in `vendor/@whip/VERSION`; loupe downloads it itself when it is missing).
 3. Provide the model provider's API key as an environment variable. Where it comes from (repo secret, Infisical, Vault) is the workflow's business, not loupe's.
 4. `uses: context-labs/loupe@main` with `config: <path to .loupe.json>`.
 

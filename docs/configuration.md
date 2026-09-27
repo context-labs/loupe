@@ -35,7 +35,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `dir` | no | One directory or a list. Overrides the top-level `dir` for this reviewer. |
 | `exclude` | no | Globs removed from scope (lockfiles, generated output, …). |
 | `model` | no | Overrides the run's model for this reviewer. |
-| `reasoning` | no | `low` \| `medium` \| `high`. Passed to the harness natively (whip `defaultEffort` in the materialized `WHIP_HOME`, `claude --effort`, codex `model_reasoning_effort`) and noted in the prompt. Unset = the harness's own default. whip without a `whip` config block keeps its own default effort; only the prompt note applies. |
+| `reasoning` | no | `low` \| `medium` \| `high`. Set on the reviewer's whip session natively (`session.effort`) and noted in the prompt. Unset = whip's own default. |
 | `agentic` | no | `false` to run one-shot; omitted = agentic (the default). |
 | `profile` | no | Noise profile: `quiet` (blockers) \| `chill` (default) \| `assertive` (all). |
 | `verify` | no | `false` to skip the verification pass (default on). |
@@ -43,7 +43,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `ensemble` | no | `["kimi-k3","glm-5.2-fast"]` — run several models, keep findings a majority agree on. |
 | `skills` | no | Paths to skill docs (a `SKILL.md` or a skill dir) folded into the reviewer, e.g. `[".agents/skills/i-have-adhd"]` to enforce a terse output style. |
 | `procedure` | no | `false` drops the always-on review procedure (caller check, wrapper rule) from this reviewer's prompt. Also a top-level default. |
-| `promptCache` | no | `false` (default `true`) suppresses the stable prompt-cache key loupe sends so the provider reuses the cached system prefix. Set `false` for a reviewer whose model rejects `prompt_cache_key` as an unrecognized argument (e.g. some OpenAI-compatible endpoints strict-validate unknown fields); those models cache the prefix automatically by match, so the key adds nothing and its presence can 400. Also a top-level default and the `prompt-cache` Action input / `--no-prompt-cache` flag. The whip harness also self-heals a cache-key 400 by retrying without the key, so this flag only skips that wasted round-trip. |
+| `promptCache` | no | `false` (default `true`) suppresses the stable prompt-cache key loupe sends so the provider reuses the cached system prefix. Set `false` for a reviewer whose model rejects `prompt_cache_key` as an unrecognized argument (e.g. some OpenAI-compatible endpoints strict-validate unknown fields); those models cache the prefix automatically by match, so the key adds nothing and its presence can 400. Also a top-level default and the `prompt-cache` Action input / `--no-prompt-cache` flag. loupe sends the key as the session's `cache_key`. |
 | `priorComments` | no | What happens to this reviewer's earlier inline comments on a re-review: `resolve` (default: resolve the thread, history kept) \| `delete` \| `keep` (leave them, new comments accumulate). Also a top-level default and the `prior-comments` Action input / `--prior-comments` flag. |
 | `maxComments` | no | Max inline comments posted (default 10). Extras are ranked out by severity and listed in a collapsed "Additional findings" section of the summary; a demoted blocker still requests changes. Also a top-level default and the `max-comments` Action input / `--max-comments` flag. |
 | `crossReviewerDedup` | no | `false` lets the same finding post from multiple reviewers (no dedup). Default `true`: before posting, the union of all reviewers' inline findings is deduplicated so the same reworded claim posts once. Also a top-level default and the `cross-reviewer-dedup` Action input. |
@@ -60,7 +60,7 @@ Top level or per reviewer, a string or a list:
 ```
 
 Only changed files under a listed directory are in scope, and convention docs
-(`AGENTS.md`, …) are read from each. With one directory the harness runs inside
+(`AGENTS.md`, …) are read from each. With one directory the agent runs inside
 it and the prompt explains the path mapping. With several it runs at the repo
 root so the agent reads both sides of a change in one review. The Action input
 and `--dir` flag take a comma-separated list. A single string keeps working as
@@ -81,14 +81,19 @@ Every review's system prompt is assembled from:
    senior-reviewer prompt; a reviewer's `prompt`/`promptFile` (or `--prompt-file`)
    replaces this layer only.
 2. **Reasoning note** — from `reasoning` / `--reasoning`.
-3. **Tool directive + output contract** — always appended by loupe. This is why
-   a custom prompt can never break JSON parsing or change tool behavior. Write
-   only persona/priorities in a custom prompt, never the JSON schema.
+3. **Tool directive + output contract** — always appended by loupe. The
+   contract is also the reviewer definition's output schema: the whip daemon
+   shows the model the shape, validates the final message against it, and
+   corrects it once. This is why a custom prompt can never break JSON parsing
+   or change tool behavior. Write only persona/priorities in a custom prompt,
+   never the JSON schema.
 
 ## Agentic vs one-shot
 
-- **Agentic (default):** the harness gets the checkout and uses tools to inspect
-  the real schema/code, not just the diff (higher turn budget). Needs a real
+- **Agentic (default):** the reviewer is a whip agent with read-only access to
+  the checkout (whip's `files` module; a hook makes any write attempt visible)
+  and reads the PR's hunks from a diff file loupe writes, so it can inspect the
+  real schema/code, not just the diff (higher turn budget). Needs a real
   checkout as workdir — CI checks the repo out; locally pass `--workdir`.
 - **One-shot:** `"agentic": false` (or `--no-agentic`) — reviews from the diff
   alone. Faster and cheaper; good for a general bug pass.
@@ -108,7 +113,7 @@ or `LOUPE_CONVENTION_PATHS`). With `--dir`, paths resolve under the subdir
 
 Load your repo's skill docs into the reviewer. Each entry is a path (relative to
 the checkout) to a `SKILL.md` or a skill directory; loupe reads them and folds
-them into the system prompt. This is how you enhance the underlying agent harness
+them into the system prompt. This is how you enhance the reviewer agent
 with your repo's own skills — the skills live in the **consuming repo**, not in
 loupe.
 

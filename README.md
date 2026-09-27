@@ -1,9 +1,9 @@
 # loupe
 
-A harness- and model-agnostic AI pull-request reviewer. Define as many focused
-reviewers as you want, run them from your terminal or as a GitHub Action, and
-get **real GitHub reviews with inline, line-anchored comments** — not just a
-wall-of-text PR comment.
+An AI pull-request reviewer built on [whip](https://github.com/context-labs/whip).
+Define as many focused reviewers as you want, run them from your terminal or as
+a GitHub Action, and get **real GitHub reviews with inline, line-anchored
+comments** — not just a wall-of-text PR comment.
 
 **Docs:** [`docs/`](docs/README.md) — user guide, configuration, credentials,
 GitHub Action, and the maintainer architecture reference.
@@ -17,33 +17,35 @@ GitHub Action, and the maintainer architecture reference.
   source, a migration-risk reviewer reads the SQL, a security reviewer reads the
   auth code. Each posts its own labeled review, and a reviewer whose globs match
   nothing stays quiet.
-- **Any harness, any model — your choice, not the vendor's.** loupe drives the
-  agent CLI you already use — [whip](https://github.com/context-labs/whip),
-  Claude, Codex — as a subprocess, and any model those can reach. Pick the
-  harness, model, and effort _per reviewer_. Hosted reviewers like Bugbot lock
-  you to their backend and their model; loupe doesn't — point it at a frontier
-  closed model, a fast open one, or a whole panel of them.
+- **Any model, your choice.** Each reviewer is a whip agent, so it runs on any
+  model whip can reach — a frontier closed model, a fast open one, or a panel
+  of them for an ensemble. Pick the model and effort _per reviewer_. Hosted
+  reviewers like Bugbot lock you to their backend and their model; loupe
+  doesn't.
 - **Local and CI are the same engine.** The exact review that runs in the GitHub
   Action runs from your terminal with one command — `--dry-run` to preview
   without posting. No separate local path to drift, no "works in CI only".
 - **It reads the repo's own rules.** loupe enforces each repo's
   `CLAUDE.md` / `AGENTS.md` at review time — no vendored rulebook to copy around
   and keep in sync.
-- **A panel of models for the hard calls.** Agentic reviewers can fan out
-  subagents across a diverse set of models to independently double- or
-  triple-confirm a suspected bug before flagging it — fewer false positives, and
-  the confident ones land as inline comments.
+- **The runtime enforces the review contract.** Each reviewer is a whip agent
+  definition with the review schema as its output contract: the daemon
+  validates the reviewer's final message against it and corrects it once.
+  Reviewers hold read-only authority, and an agentic verify pass reads the
+  checkout to refute findings the surrounding code does not support.
 
 ## How it works
 
 ```
 pull_request event  (or `loupe review` locally, or an @loupe comment)
-  └─ @loupe/action        reads config from env/flags, resolves harness credentials
-       ├─ @loupe/core     fetch PR + conventions → build prompt → run harness →
+  └─ @loupe/action        reads config from env/flags, brings up whip
+       ├─ @loupe/harness  starts or attaches to the whip daemon (Unix socket),
+       │                  builds each reviewer as an agent definition with an
+       │                  output contract, runs one turn per review via the SDK
+       ├─ @loupe/core     fetch PR + conventions → build prompt → run the turn →
        │                  parse + validate findings against the diff →
        │                  POST /pulls/{n}/reviews (inline comments, empty body)
        │                  POST/PATCH /issues/{n}/comments (persistent summary)
-       ├─ @loupe/harness  the agent CLI as a subprocess (whip, claude, codex, …)
        └─ @loupe/credentials  provider chain: env → dotenv → infisical → your own
 ```
 
@@ -57,18 +59,19 @@ diagram — not a restatement of the diff.
 
 ```bash
 bun install
-# whip self-authenticates from its own local login — no keys to wire:
-bun run packages/action/src/cli.ts review owner/repo#123 --harness whip
-
-# or bring a key for a hosted harness:
-ANTHROPIC_API_KEY=sk-... \
-  bun run packages/action/src/cli.ts review owner/repo#123 --harness claude
+# the whip daemon self-authenticates from its own local login — no keys to wire:
+bun run packages/action/src/cli.ts review owner/repo#123 --dry-run
 ```
 
-Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`.
+loupe attaches to the running whip daemon over its Unix socket, starting one if
+needed. Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`.
+The binary is `whipcode` on `PATH`; `LOUPE_WHIP_BIN` names another, and when
+neither exists loupe downloads the pinned release it was built against. With a
+`--config` whose `whip` block names a provider, models are routed through that
+provider, so it must be configured in your daemon.
 
-Key flags (defaults in parens): `--harness` (whip), `--model` (kimi-k3),
-`--reasoning low|medium|high` (harness default; passed natively), `--profile quiet|chill|assertive` (chill),
+Key flags (defaults in parens): `--model` (kimi-k3),
+`--reasoning low|medium|high` (whip's default; set on the session), `--profile quiet|chill|assertive` (chill),
 `--config <path>` (focused reviewers), `--reviewer <name>` (run just one),
 `--prompt-file <path>` (custom guidance), `--dir` (subdir scope), `--ensemble`
 (multi-model majority), `--timezone`, `--max-turns` (agentic loop cap),
@@ -76,8 +79,8 @@ Key flags (defaults in parens): `--harness` (whip), `--model` (kimi-k3),
 `--no-verify`, `--no-agentic`,
 `--providers env,dotenv,infisical`, `--dry-run`.
 
-Use `--dry-run` (with `LOG_LEVEL=debug` to see raw harness output) to compute and
-log a review without posting — the safe way to test.
+Use `--dry-run` (with `LOG_LEVEL=debug` to see every cell and tool call) to
+compute and log a review without posting — the safe way to test.
 
 ## Focused reviewers (`.loupe.json`)
 
@@ -114,22 +117,24 @@ Per-reviewer keys: `prompt`/`promptFile`, `include`/`exclude`, `model`,
 ### Top-level config — keep review policy out of the workflow
 
 The config file also carries the **review defaults** that used to be repeated in
-every workflow file: `harness`, `model`, `reasoning`, `profile`, `timezone`,
+every workflow file: `model`, `reasoning`, `profile`, `timezone`,
 `dir`, and `maxTurns` (the agentic tool-loop cap; also per-reviewer), plus
 `maxComments` (the inline comment cap; also per-reviewer). Precedence
 is **Action input / CLI flag → `.loupe.json` → built-in
 default**, so a workflow can still override, but by default the policy lives with
 the repo.
 
-It can also declare the **whip provider + model panel** under `whip`, so the
-workflow no longer hand-writes `~/.whip/config.json` in a CI step. loupe
-materializes it into a throwaway `WHIP_HOME` at review time (never touching a
-developer's real `~/.whip`); only the API key _value_ stays in the workflow —
-its env-var name is in the config.
+It also declares the **whip provider + model panel** under `whip`. In CI, when
+the provider's API key is in the environment, loupe writes that block into a
+throwaway `WHIPCODE_HOME`, starts a dedicated daemon there, and stops it
+afterwards — never touching a developer's real `~/.whipcode`. Locally, without
+the key, loupe uses your own whip login instead. Only the API key _value_ stays
+in the workflow; its env-var name is in the config. Every session names the
+block's provider, so the models resolve even on a daemon whose default provider
+is another.
 
 ```json
 {
-  "harness": "whip",
   "model": "kimi-k3",
   "timezone": "PST",
   "dir": "inference",
@@ -145,9 +150,9 @@ its env-var name is in the config.
 }
 ```
 
-With that, the whole workflow is just: checkout → install the harness binary →
+With that, the whole workflow is just: checkout → install whipcode →
 `context-labs/loupe@v0` with `config: .loupe.json` and the secret in `env`. See
-Variant D in `examples/review.example.yml`.
+Variant C in `examples/review.example.yml`.
 
 ```bash
 loupe review owner/repo#123 --config .loupe.json
@@ -164,9 +169,10 @@ The system prompt is layered. `--prompt-file` (CLI) / `prompt-file` input
 (persona + priorities). loupe always appends the review procedure (check
 callers first; `procedure: false` removes it), the profile directive,
 tool-access directive, repo conventions, and the JSON output contract, plus a
-reasoning note when `reasoning` is set — so a custom prompt can't break parsing
-or trigger tool loops. Write
-only persona/priorities; never the JSON schema. See `examples/loupe-prompt.md`.
+reasoning note when `reasoning` is set — and the whip daemon validates the
+final message against that contract — so a custom prompt can't break parsing
+or widen what the agent may do. Write only persona/priorities; never the JSON
+schema. See `examples/loupe-prompt.md`.
 
 ## GitHub integration
 
@@ -179,7 +185,7 @@ into a consuming repo, or register it once at the org level. A second workflow o
 comment events gives you **`@loupe` chat**: `@loupe review` (re-review),
 `@loupe fix` (fix every open Loupe finding in one commit), `@loupe fix <what>`
 (make a specific edit and push it), `@loupe <question>` (Q&A grounded in the diff), and `@loupe help`. Inputs mirror
-the CLI flags: `harness`, `model`, `reasoning`, `profile`, `config`, `reviewer`,
+the CLI flags: `model`, `reasoning`, `profile`, `config`, `reviewer`,
 `prompt-file`, `dir`, `skills`, `ensemble`, `timezone`, `verify`, `full`,
 `convention-paths`, `credential-providers`, `github-token`.
 
@@ -187,21 +193,21 @@ the CLI flags: `harness`, `model`, `reasoning`, `profile`, `config`, `reviewer`,
 
 For a monorepo, restrict the review to one folder — only changed files under it
 are reviewed, conventions are read from it (`inference/AGENTS.md`), and the
-harness runs there:
+agent works there:
 
 ```bash
-loupe review context-labs/monorepo#6046 --harness whip --dir inference
+loupe review context-labs/monorepo#6046 --dir inference
 ```
 
 In the Action, set the `dir` input (or `LOUPE_DIR`).
 
 ## Credentials
 
-Harnesses that self-authenticate need no provider at all: `whip` reviews using
-its own local login (`~/.whip/`), so `loupe review --harness whip` just works
-once `whip auth inference-net login` has been run.
-
-Otherwise `LOUPE_CREDENTIAL_PROVIDERS` is an ordered chain; first hit wins:
+The whip daemon holds the model credentials. Locally that is your whip login
+(`whipcode auth inference-net`), so `loupe review` just works. In CI the `whip`
+block's `apiKeyEnv` names the variable the daemon reads; loupe resolves it
+through `LOUPE_CREDENTIAL_PROVIDERS`, an ordered chain where the first hit
+wins:
 
 - `env` — `process.env` (default; works with plain GitHub secrets)
 - `dotenv` — a `.env` file
@@ -224,5 +230,7 @@ task check   # format + lint + tsc + test
 ```
 
 Bun workspace monorepo: `@loupe/credentials`, `@loupe/harness`, `@loupe/logger`,
-`@loupe/core`, `@loupe/action`. Tooling mirrors the inference monorepo
-(oxlint / oxfmt / typescript-7 / Taskfile).
+`@loupe/core`, `@loupe/action`, plus the vendored `@whip/protocol` and
+`@whip/sdk` under `vendor/` (refresh with `task vendor:whip WHIP=<whip checkout>`;
+the release and commit are in `vendor/@whip/VERSION`). Tooling mirrors the
+inference monorepo (oxlint / oxfmt / typescript-7 / Taskfile).

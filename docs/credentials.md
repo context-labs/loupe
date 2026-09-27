@@ -1,13 +1,27 @@
 # Credentials
 
-loupe resolves the secrets a harness needs through an ordered **provider chain**;
-the first provider to return a value for a key wins. Resolved values are injected
-into the harness subprocess env.
+The whip daemon holds the model credentials; loupe never sends a model key
+itself. loupe's job is to make sure the daemon it attaches to has one.
 
-## Providers
+## Locally
+
+Your own whip login (`whipcode auth inference-net`, stored under
+`~/.whipcode`). loupe attaches to your running daemon over its Unix socket, or
+starts one, and ignores the config's `whip` block when its `apiKeyEnv` is not
+set — so `loupe review` just works and a developer's real `~/.whipcode` is never
+modified. Every session still names the block's provider, so its models resolve
+even when the daemon's default provider is another; the provider must be
+configured in your daemon.
+
+## In CI
+
+The `.loupe.json` `whip` block names the provider and the env var it reads the
+key from (`apiKeyEnv`). loupe resolves that variable through the provider
+chain, writes the block into a throwaway `WHIPCODE_HOME`, starts a dedicated
+daemon there with the key in its environment, and stops it when the run ends.
 
 Set the chain with `--providers` (CLI) or `LOUPE_CREDENTIAL_PROVIDERS` (Action),
-comma-separated:
+comma-separated; the first provider to return the value wins:
 
 | Provider | Reads from |
 |---|---|
@@ -18,23 +32,9 @@ comma-separated:
 Add your own by implementing `CredentialProvider` (`{ name, get(key) }`) from
 `@loupe/credentials`.
 
-## Per-harness auth
+Resolution is **best-effort**: if no provider supplies the key, loupe logs a
+warning and falls back to the local login, and a genuinely missing credential
+surfaces as the daemon's own auth error (visible at `LOG_LEVEL=debug`).
 
-Each harness declares `credentialKeys` — the env vars it wants forwarded:
-
-| Harness | Keys | Notes |
-|---|---|---|
-| `whip` | (none) | Self-authenticates. Reads `INFERENCE_API_KEY` if present, else its own local login (`~/.whip`). inference.net is its built-in default provider. |
-| `claude` | `ANTHROPIC_API_KEY` | Falls back to the local `claude` login if the key is absent. |
-| `codex` | `OPENAI_API_KEY` | — |
-
-Resolution is **best-effort**: loupe forwards whatever keys the chain can supply
-and does not hard-fail on a missing one — a locally-logged-in harness self-auths,
-and a genuinely missing key surfaces as the harness's own auth error (visible at
-`LOG_LEVEL=debug`).
-
-## In CI
-
-The harness runs on the runner, so its key must reach the job env. With whip +
-inference.net, expose `INFERENCE_API_KEY` to the job (e.g. via Infisical) and the
-`env` provider forwards it. See [github-action.md](github-action.md).
+The resolved values are also what the review trace scrubs from every payload
+before it reaches the Actions step summary; see [Review traces](review-traces.md).

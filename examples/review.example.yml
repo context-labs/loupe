@@ -10,49 +10,36 @@ permissions:
   pull-requests: write # required to post the inline review
 
 jobs:
-  # --- Variant A: internal (whip + inference.net) ---------------------------
-  # whip self-authenticates from its own login; nothing to wire but the login.
-  review-whip:
+  # --- Variant A: flags only ------------------------------------------------
+  # The whip daemon self-authenticates from its own login; nothing to wire but
+  # the login and the whipcode binary (loupe downloads the pinned release when
+  # it is missing from PATH).
+  review:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: context-labs/loupe@v0
         with:
-          harness: whip
           model: kimi-k3
           reasoning: medium
           dir: inference # scope a monorepo to one folder (optional)
 
-  # --- Variant B: external (claude + API key secret) ------------------------
-  review-claude:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: context-labs/loupe@v0
-        with:
-          harness: claude
-          model: claude-opus-4-8
-          reasoning: high
-        env:
-          # The harness CLI reads this; loupe's env provider forwards it in.
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-  # --- Variant C: custom reviewer prompt ------------------------------------
+  # --- Variant B: custom reviewer prompt ------------------------------------
   # Point prompt-file at a doc in your repo. Your guidance replaces the default;
-  # loupe still appends the JSON output contract, so parsing can't break.
+  # loupe still appends the JSON output contract, and the whip daemon enforces
+  # it on the reviewer's final message, so parsing can't break.
   review-custom:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: context-labs/loupe@v0
         with:
-          harness: whip
           prompt-file: .github/loupe-prompt.md
 
-  # --- Variant D: config-driven (recommended for multiple repos) ------------
-  # Put ALL review policy in .loupe.json — harness, model, timezone, dir, the
-  # whip provider + model panel, and the reviewers. The workflow then only
-  # provisions: checkout, the harness binary, and the secret. Nothing to repeat
+  # --- Variant C: config-driven (recommended for multiple repos) ------------
+  # Put ALL review policy in .loupe.json — model, timezone, dir, the whip
+  # provider + model panel, and the reviewers. The workflow then only
+  # provisions: checkout, the whipcode binary, and the secret. Nothing to repeat
   # across repos or between the review and chat workflows.
   review-config:
     runs-on: ubuntu-latest
@@ -62,10 +49,14 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      # install your harness binary here (e.g. curl the whip release), then:
+      - name: Install whipcode (the release in loupe's vendor/@whip/VERSION)
+        run: |
+          curl -fsSL -o whipcode https://github.com/context-labs/whip/releases/download/v1.0.0/whipcode-linux-x64
+          chmod +x whipcode && sudo mv whipcode /usr/local/bin/whipcode
       - uses: context-labs/loupe@v0
         with:
-          config: .loupe.json # harness/model/timezone/dir/whip all live here
+          config: .loupe.json # model/timezone/dir/whip all live here
         env:
-          # only the secret value stays in the workflow; its NAME is in .loupe.json
+          # only the secret value stays in the workflow; its NAME is in .loupe.json.
+          # loupe starts a dedicated whip daemon in a throwaway home with it.
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
