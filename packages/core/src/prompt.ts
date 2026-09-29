@@ -107,7 +107,15 @@ Procedure — do these before writing any finding:
 State in the summary which callers you checked and which absence claims you
 verified against the checkout.`.trim();
 
+/**
+ * Some models (notably GLM) drift into Chinese prose on long agentic runs.
+ * Every model-authored string lands in a GitHub comment, so pin the language.
+ */
+export const LANGUAGE_DIRECTIVE =
+  "Write every human-readable string in English, regardless of the language of the code, comments, or your own reasoning.";
+
 const OUTPUT_CONTRACT = `
+${LANGUAGE_DIRECTIVE}
 Respond with ONE JSON object and NOTHING else — no prose before or after it,
 and do not wrap the object in a Markdown code fence. "summary", "detail", and
 "body" values are GitHub Markdown: paragraphs and fenced code blocks inside
@@ -360,6 +368,7 @@ export function buildVerifySystemPrompt(opts?: { agentic?: boolean }): string {
     "Respond with ONE JSON object and nothing else:",
     '{ "verdicts": [ { "index": <finding index>, "real": true|false, "reason": "<short>" } ] }',
     "Include a verdict for every finding index.",
+    LANGUAGE_DIRECTIVE,
   ].join("\n");
 }
 
@@ -374,6 +383,7 @@ export function buildChatSystemPrompt(): string {
     "Use GitHub markdown. If you suggest a change, show a short code block.",
     "If the question can't be answered from the diff, say so briefly.",
     "Reply with prose only — do NOT emit a JSON review object.",
+    LANGUAGE_DIRECTIVE,
   ].join("\n");
 }
 
@@ -393,6 +403,7 @@ export function buildFixSystemPrompt(): string {
     "You are loupe, fixing a pull request. Make ONLY the change described, editing files directly in the working directory with your tools.",
     "Keep the change minimal, correct, and consistent with the surrounding code and the repo's conventions.",
     "Do NOT run git, commit, or push — only edit files. When done, briefly describe what you changed in one or two sentences.",
+    LANGUAGE_DIRECTIVE,
   ].join("\n");
 }
 

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { renderFileTree, type DiffFile } from "../src/diff";
 import {
+  buildChatSystemPrompt,
+  buildFixSystemPrompt,
   buildSystemPrompt,
   buildUserPrompt,
+  LANGUAGE_DIRECTIVE,
   buildVerifySystemPrompt,
   buildVerifyUserPrompt,
 } from "../src/prompt";
@@ -145,5 +148,18 @@ describe("review procedure and call sites", () => {
     });
     expect(p).toContain("Call sites of changed exports");
     expect(p).toContain("svc/commands/harness.ts:41");
+  });
+});
+
+describe("output language", () => {
+  it("pins English in every model-facing system prompt, even with custom guidance", () => {
+    const prompts = [
+      buildSystemPrompt({ guidance: "custom reviewer", agentic: true }),
+      buildVerifySystemPrompt(),
+      buildVerifySystemPrompt({ agentic: true }),
+      buildChatSystemPrompt(),
+      buildFixSystemPrompt(),
+    ];
+    for (const p of prompts) expect(p).toContain(LANGUAGE_DIRECTIVE);
   });
 });
