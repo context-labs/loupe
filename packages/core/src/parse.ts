@@ -43,9 +43,12 @@ export type ParsedReview = {
  * or code fences, so we grab the last balanced {...} block and validate it.
  * Throws if no recognizable review object is found — a malformed review is a
  * hard failure, not a silent empty review. "Recognizable" means the object
- * carries a string `summary`; `findings` and `concerns` may be omitted for a
- * clean review but must be arrays when present. An unrelated object like
- * `{"status":"done"}` must not parse as an empty clean review.
+ * carries at least one review key (`summary`/`findings`/`concerns`/
+ * `highlights`/`diagram`); `summary` may be omitted (a model with nothing to
+ * report sometimes emits only `{"highlights":[],"diagram":""}` — that is an
+ * empty clean review), but when present it must be a string and
+ * `findings`/`concerns` must be arrays. An unrelated object like
+ * `{"status":"done"}` carries no review key and must not parse as a review.
  */
 export function parseReviewOutput(stdout: string): ParsedReview {
   if (stdout.trim().length === 0) {
@@ -69,18 +72,35 @@ export function parseReviewOutput(stdout: string): ParsedReview {
     summary?: unknown;
     findings?: unknown;
     concerns?: unknown;
+    highlights?: unknown;
+    diagram?: unknown;
   } | null;
   const isArrayOrAbsent = (v: unknown): boolean =>
     v === undefined || Array.isArray(v);
+  // "Recognizable review" = an object carrying at least one review key. A model
+  // that has nothing to report may emit a minimal object (e.g.
+  // `{"highlights":[],"diagram":""}`) with no `summary` — that is an empty clean
+  // review, not a failure (schema defaults summary to "" and the arrays to []).
+  // Unrelated JSON like `{"status":"done"}` carries no review key and still fails.
+  const reviewKeys = [
+    "summary",
+    "findings",
+    "concerns",
+    "highlights",
+    "diagram",
+  ];
+  const hasReviewKey =
+    typeof shape === "object" &&
+    shape !== null &&
+    reviewKeys.some((k) => k in shape);
   if (
-    typeof shape !== "object" ||
-    shape === null ||
-    typeof shape.summary !== "string" ||
-    !isArrayOrAbsent(shape.findings) ||
-    !isArrayOrAbsent(shape.concerns)
+    !hasReviewKey ||
+    (shape?.summary !== undefined && typeof shape.summary !== "string") ||
+    !isArrayOrAbsent(shape?.findings) ||
+    !isArrayOrAbsent(shape?.concerns)
   ) {
     throw new Error(
-      `Harness output is not a review (needs a string "summary"; "findings"/"concerns" must be arrays when present):\n${candidate.slice(0, 1000)}`,
+      `Harness output is not a review (expected an object with a "summary"/"findings"/"concerns"/"highlights"/"diagram" key; "summary" a string and "findings"/"concerns" arrays when present):\n${candidate.slice(0, 1000)}`,
     );
   }
   const { summary, findings, concerns, highlights, diagram } =
