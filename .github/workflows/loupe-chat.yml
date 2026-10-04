@@ -37,20 +37,20 @@ jobs:
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     steps:
       - uses: actions/checkout@v5
-      - name: Install whip (pinned v0.6.5)
+      - name: Install whipcode (pinned v1.0.0)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Pin to v0.6.5 — the last release whose binary installs as `whip`.
-          # (v1.0.0 renamed the binary to `whipcode`.) The harness resolves
-          # either name, but CI stays on the pinned `whip` for stability.
-          tag="v0.6.5"
-          echo "Installing whip $tag"
-          gh release download "$tag" --repo context-labs/whip --pattern "*-linux-x64" --output whip --clobber
-          chmod +x whip
-          sudo mv whip /usr/local/bin/whip
-          whip --version || true
+          # Pin to the release loupe's vendored SDK came from (vendor/@whip/VERSION);
+          # the SDK refuses a daemon from another protocol major. If this step
+          # fails, loupe downloads the same tag itself at review time.
+          tag="v1.0.0"
+          echo "Installing whipcode $tag"
+          gh release download "$tag" --repo context-labs/whip --pattern "whipcode-linux-x64" --output whipcode --clobber
+          chmod +x whipcode
+          sudo mv whipcode /usr/local/bin/whipcode
+          whipcode --version || true
       - name: Load loupe secrets from Infisical
         continue-on-error: true
         uses: Infisical/secrets-action@v1.0.15

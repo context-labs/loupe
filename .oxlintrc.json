@@ -4,7 +4,7 @@
   "categories": { "correctness": "error" },
   "options": { "typeAware": true },
   "env": { "builtin": true },
-  "ignorePatterns": ["**/dist/**", "**/build/**", "**/coverage/**"],
+  "ignorePatterns": ["**/dist/**", "**/build/**", "**/coverage/**", "**/vendor/**"],
   "rules": {
     "typescript/no-explicit-any": "warn",
     "typescript/no-floating-promises": "error",

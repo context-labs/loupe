@@ -1,0 +1,11 @@
+export declare const utf8: TextEncoder;
+export declare const byteLength: (text: string) => number;
+export declare function object(value: unknown): value is Record<string, unknown>;
+export declare function frozen<T>(value: T): T;
+export declare function withSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T>;
+export declare function decodeBase64(value: string): Uint8Array<ArrayBuffer>;
+export declare function encodeBase64(bytes: Uint8Array): string;
+export declare function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>>;
+export declare function digestHex(bytes: Uint8Array<ArrayBuffer>): Promise<string>;
+export declare function uuid(): string;
+export declare function notify<T>(listeners: Set<(value: T) => void>, value: T): void;

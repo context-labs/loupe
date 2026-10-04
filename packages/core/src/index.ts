@@ -13,7 +13,6 @@ import {
   isNonRetryableHarnessError,
   type Harness,
   type HarnessTraceEvent,
-  type WhipConfig,
 } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
 import type { Octokit } from "@octokit/rest";
@@ -39,7 +38,8 @@ import {
   mergeEnsemble,
   SIMILARITY_THRESHOLD,
 } from "./ensemble";
-import { parseReviewOutput, parseVerification } from "./parse";
+import { reviewOutput, verdictsOutput } from "./output";
+import { outcomeText, parseReviewOutput, parseVerification } from "./parse";
 import {
   severityRank,
   severitiesForProfile,
@@ -89,6 +89,7 @@ export * from "./validate";
 export * from "./github";
 export * from "./ensemble";
 export * from "./callsites";
+export * from "./output";
 
 export type ReviewRequest = {
   /** Authenticated GitHub client; see makeOctokit. */
@@ -96,10 +97,8 @@ export type ReviewRequest = {
   readonly ref: PullRef;
   readonly harness: Harness;
   readonly workdir: string;
-  /** Secrets to inject into the harness subprocess (e.g. ANTHROPIC_API_KEY). */
-  readonly harnessEnv: Record<string, string>;
-  /** whip provider/model catalog to materialize into a throwaway WHIP_HOME. */
-  readonly whipConfig?: WhipConfig;
+  /** Provider the models are routed through (the whip block's); empty uses the daemon's default. */
+  readonly provider?: string;
   /** Convention doc paths to pull from the target repo, in priority order. */
   readonly conventionPaths: readonly string[];
   /**
@@ -816,15 +815,17 @@ export async function produceReview(
     const run = (useAgentic: boolean, phase: string) =>
       req.harness
         .review({
+          agent: "reviewer",
+          output: reviewOutput,
+          name: req.reviewerName,
           systemPrompt: useAgentic
             ? systemPrompt
             : buildSystemPrompt({ ...promptOpts, agentic: false }),
           userPrompt: useAgentic ? agenticUserPrompt : headlessUserPrompt,
           model,
+          provider: req.provider,
           agentic: useAgentic,
           workdir: harnessCwd,
-          env: req.harnessEnv,
-          whipConfig: req.whipConfig,
           maxTurns: req.maxTurns,
           reasoning: req.reasoning,
           cacheKey,
@@ -832,7 +833,7 @@ export async function produceReview(
           phase,
           logger,
         })
-        .then(parseReviewOutput);
+        .then((outcome) => parseReviewOutput(outcomeText(outcome)));
     let parsed;
     try {
       parsed = await run(agentic, model ? `${tag}:${model}` : tag);
@@ -1116,16 +1117,17 @@ async function verifyInline(
 ): Promise<{ kept: Finding[]; status: ReviewDiagnostics["verify"] }> {
   const verifyAgentic = agentic && hasCheckout;
   try {
-    const stdout = await req.harness.review({
+    const outcome = await req.harness.review({
+      agent: "verifier",
+      output: verdictsOutput,
       systemPrompt: buildVerifySystemPrompt({ agentic: verifyAgentic }),
       userPrompt: buildVerifyUserPrompt(findings, files, {
         cwdSubdir: verifyAgentic ? cwdSubdir : undefined,
       }),
       model: req.model,
+      provider: req.provider,
       agentic: verifyAgentic,
       workdir: harnessCwd,
-      env: req.harnessEnv,
-      whipConfig: req.whipConfig,
       maxTurns: req.maxTurns,
       reasoning: req.reasoning,
       cacheKey:
@@ -1136,7 +1138,7 @@ async function verifyInline(
       phase: req.model ? `verify:${req.model}` : "verify",
       logger: req.logger,
     });
-    const result = parseVerification(stdout, findings.length);
+    const result = parseVerification(outcomeText(outcome), findings.length);
     if (!result.valid) {
       req.logger.warn("Verification output invalid; keeping all findings", {
         reasons: result.reasons,

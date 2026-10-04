@@ -1,6 +1,6 @@
 # How loupe works
 
-loupe is a GitHub Action that reviews pull requests with an agentic coding CLI (whip, claude, or codex). A repo declares one or more focused **reviewers** in a `.loupe.json`, each with its own prompt and file globs. loupe runs every reviewer whose globs match a changed file, posts reviewer-specific inline comments, and updates one persistent combined summary.
+loupe is a GitHub Action that reviews pull requests with [whip](https://github.com/context-labs/whip) agents. A repo declares one or more focused **reviewers** in a `.loupe.json`, each with its own prompt and file globs. loupe runs every reviewer whose globs match a changed file, posts reviewer-specific inline comments, and updates one persistent combined summary.
 
 Source: [context-labs/loupe](https://github.com/context-labs/loupe). loupe reviews its own PRs with [`.loupe/config.json`](../../.loupe/config.json).
 

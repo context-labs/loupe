@@ -20,8 +20,15 @@ import {
   type CredentialProvider,
 } from "@loupe/credentials";
 import {
-  getHarness,
+  connect,
+  discoverModels,
+  ensureDaemon,
+  envSecretValues,
+  whipHarness,
+  type DaemonHandle,
+  type Harness,
   type HarnessTraceEvent,
+  type WhipClient,
   type WhipConfig,
 } from "@loupe/harness";
 import type { Logger } from "@loupe/logger";
@@ -31,7 +38,6 @@ export type RunInput = {
   readonly owner: string;
   readonly repo: string;
   readonly pullNumber: number;
-  readonly harnessName: string;
   readonly workdir: string;
   readonly conventionPaths: readonly string[];
   readonly providers: readonly CredentialProvider[];
@@ -63,38 +69,80 @@ export type RunInput = {
   readonly logger: Logger;
 };
 
-/** Resolve the harness, verify it is installed, and forward its env. */
-async function resolveHarness(input: RunInput): Promise<{
-  harness: ReturnType<typeof getHarness>;
-  harnessEnv: Record<string, string>;
-}> {
-  const { logger } = input;
-  const harness = getHarness(input.harnessName);
-  if (!(await harness.available())) {
-    throw new Error(`Harness "${harness.name}" CLI is not installed.`);
-  }
-  // Best-effort: forward whatever credential keys the providers can supply.
-  // We don't hard-fail on a missing key — harnesses often self-authenticate
-  // from a local login (whip via ~/.whip, claude via its own login). If a key
-  // is genuinely required and absent, the harness surfaces its own auth error.
-  const harnessEnv = await resolveCredentials(
-    harness.credentialKeys,
-    input.providers,
-  );
-  const missing = harness.credentialKeys.filter((k) => !(k in harnessEnv));
-  logger.debug("Harness ready", {
-    harness: harness.name,
-    forwardedKeys: Object.keys(harnessEnv),
-    missingKeys: missing,
-    providers: input.providers.map((p) => p.name),
+/** What bringing whip up needs: the `whip` block and where its key comes from. */
+export type WhipOptions = {
+  readonly whipConfig?: WhipConfig;
+  readonly providers: readonly CredentialProvider[];
+  readonly logger: Logger;
+};
+
+type Whip = {
+  readonly harness: Harness;
+  readonly client: WhipClient;
+  readonly daemon: DaemonHandle;
+};
+
+/**
+ * One daemon and one client per process, shared by every reviewer that runs
+ * concurrently in it. The first caller brings whip up: resolve the provider's
+ * API key through the credential chain, make sure a daemon is running (a
+ * dedicated one when the `whip` block's key is available), and connect. The
+ * memoized promise makes every caller await the same bring-up; a failed one
+ * clears so the next attempt is fresh. `releaseWhip` lets go of it all.
+ */
+let shared: Promise<Whip> | undefined;
+
+export function resolveHarness(opts: WhipOptions): Promise<Harness> {
+  shared ??= bringUp(opts).catch((err: unknown) => {
+    shared = undefined;
+    throw err;
   });
-  return { harness, harnessEnv };
+  return shared.then((w) => w.harness);
+}
+
+async function bringUp(opts: WhipOptions): Promise<Whip> {
+  const credentials = opts.whipConfig
+    ? await resolveCredentials(
+        [opts.whipConfig.provider.apiKeyEnv],
+        opts.providers,
+      )
+    : {};
+  const daemon = await ensureDaemon({
+    whipConfig: opts.whipConfig,
+    credentials,
+    logger: opts.logger,
+  });
+  const client = await connect(daemon, opts.logger);
+  // A dedicated daemon in a throwaway home starts without a model catalog;
+  // the same call is a cheap no-op on a daemon that already has one.
+  if (opts.whipConfig) {
+    await discoverModels(client, opts.whipConfig.provider.name, opts.logger);
+  }
+  // Known secrets (the resolved credential values handed to the daemon) are
+  // scrubbed from every trace payload so an API key that surfaces in a tool
+  // result or reasoning chunk never lands in the summary.
+  return {
+    harness: whipHarness(client, envSecretValues(daemon.env)),
+    client,
+    daemon,
+  };
+}
+
+/** Close the shared client and stop a daemon loupe started; a no-op otherwise. */
+export async function releaseWhip(): Promise<void> {
+  const pending = shared;
+  shared = undefined;
+  if (!pending) return;
+  const whip = await pending.catch(() => undefined);
+  if (!whip) return;
+  whip.client.close();
+  await whip.daemon.stop();
 }
 
 /** Build a ReviewRequest from a RunInput (shared by produce/publish/run). */
 async function buildRequest(input: RunInput): Promise<ReviewRequest> {
   const { logger } = input;
-  const { harness, harnessEnv } = await resolveHarness(input);
+  const harness = await resolveHarness(input);
   return {
     octokit: makeOctokit(input.token, logger),
     ref: {
@@ -104,8 +152,9 @@ async function buildRequest(input: RunInput): Promise<ReviewRequest> {
     },
     harness,
     workdir: input.workdir,
-    harnessEnv,
-    whipConfig: input.whipConfig,
+    // The desktop daemon's default provider may not carry the model, so every
+    // session names the whip block's provider explicitly.
+    provider: input.whipConfig?.provider.name,
     conventionPaths: input.conventionPaths,
     dirs: input.dirs,
     dryRun: input.dryRun,
@@ -134,7 +183,7 @@ async function buildRequest(input: RunInput): Promise<ReviewRequest> {
   };
 }
 
-/** Resolve the harness + credentials, then review end-to-end. Shared by Action and CLI. */
+/** Bring whip up, then review end-to-end. Shared by Action and CLI. */
 export async function reviewPullRequest(
   input: RunInput,
 ): Promise<ReviewResult> {

@@ -9,3 +9,6 @@ packages/*/src/**/*.js
 packages/*/src/**/*.js.map
 packages/*/src/**/*.d.ts
 packages/*/src/**/*.d.ts.map
+
+# vendored prebuilt packages (see vendor/@whip/VERSION)
+!vendor/@whip/sdk/dist/

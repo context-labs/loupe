@@ -168,7 +168,6 @@ export async function runReviews(
     owner: config.owner,
     repo: config.repo,
     pullNumber: config.pullNumber,
-    harnessName: config.harnessName,
     workdir: config.workdir,
     conventionPaths: config.conventionPaths,
     providers: config.providers,
@@ -256,7 +255,7 @@ export async function runReviews(
     readTrace: () => ReviewerTrace;
   }[] = [];
   const collectors = inputs.map(({ label, input }) => {
-    const collector = createTraceCollector(label, config.harnessName);
+    const collector = createTraceCollector(label, "whip");
     return { label, input, collector };
   });
   const settled = await Promise.all(

@@ -5,6 +5,7 @@ import { loadConfig } from "./config";
 import { setOutput, statusForError, statusForOutcomes } from "./output";
 import { runReviews, CombinedSummaryPublicationError } from "./orchestrate";
 import { handleComment } from "./respond";
+import { releaseWhip } from "./run";
 
 const logger = createRootLogger("loupe-action");
 
@@ -47,4 +48,7 @@ main()
     );
     process.exitCode = 1;
   })
-  .finally(() => shutdownLogger());
+  .finally(async () => {
+    await releaseWhip();
+    await shutdownLogger();
+  });

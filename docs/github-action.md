@@ -1,8 +1,10 @@
 # GitHub Action
 
 `action.yml` is a composite action: it sets up Bun, installs loupe's deps, and
-runs the reviewer against the PR. The harness CLI must be installed by the
-consuming workflow (it is not bundled).
+runs the reviewer against the PR. The `whipcode` binary should be installed by
+the consuming workflow (it is not bundled); when it is missing, loupe downloads
+the pinned release it was built against. loupe starts a whip daemon from it for
+the duration of the run.
 
 ## Minimal workflow
 
@@ -22,20 +24,25 @@ jobs:
     continue-on-error: true # advisory: never block a PR
     steps:
       - uses: actions/checkout@v4
-      - name: Install whip
+      - name: Install whipcode
         run: |
-          curl -fsSL -o whip https://github.com/context-labs/whip/releases/download/v0.4.1/whip-linux-x64
-          chmod +x whip && sudo mv whip /usr/local/bin/whip
+          curl -fsSL -o whipcode https://github.com/context-labs/whip/releases/download/v1.0.0/whipcode-linux-x64
+          chmod +x whipcode && sudo mv whipcode /usr/local/bin/whipcode
       - uses: context-labs/loupe@v0
         with:
-          harness: whip
           model: kimi-k3
           config: .loupe.json
         env:
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
 ```
 
-See `examples/review.example.yml` for whip / claude / custom-prompt
+Pin the whip release to the one loupe's vendored SDK came from
+(`vendor/@whip/VERSION`); the SDK refuses a daemon from another protocol major.
+With the `whip` block in `.loupe.json` and `INFERENCE_API_KEY` in the job env,
+loupe writes the provider config into a throwaway `WHIPCODE_HOME`, starts a
+dedicated daemon there, and stops it when the run ends.
+
+See `examples/review.example.yml` for the config-driven and custom-prompt
 variants. The live monorepo wiring is `inference/.loupe/` + the
 `inference--loupe-review.yml` workflow.
 
@@ -56,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: context-labs/loupe@v0
-        with: { harness: whip, config: .loupe.json }
+        with: { config: .loupe.json }
         env: { INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }} }
 ```
 
@@ -66,12 +73,15 @@ push it to the PR branch), `@loupe <question>` (answer grounded
 in the diff), `@loupe help`. loupe auto-detects the comment event and switches to
 chat mode; a comment without `@loupe` is ignored.
 
-`@loupe fix` needs the chat job to have `permissions: contents: write` (to push)
-and only works on same-repo branches, not forks.
+`@loupe fix` runs a fixer agent that may edit files and run commands inside the
+checkout but is blocked from git history commands, recursive deletes, and
+escalation; loupe itself commits and pushes. It needs the chat job to have
+`permissions: contents: write` (to push) and only works on same-repo branches,
+not forks.
 
 ## Inputs
 
-`harness`, `model`, `reasoning`, `profile`, `verify`, `full`, `prompt-file`,
+`model`, `reasoning`, `profile`, `verify`, `full`, `prompt-file`,
 `config`, `reviewer`, `dir`, `convention-paths`, `credential-providers`,
 `ensemble`, `skills`, `timezone`, `max-turns`, `max-comments`, `cross-reviewer-dedup` (default `true`), `prompt-cache` (default
 `true`), `prior-comments` (default
@@ -83,13 +93,16 @@ action's own directory.
 
 The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
 `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_EVENT_PATH`, `GITHUB_WORKSPACE`,
-`LOUPE_PR_NUMBER`, `LOUPE_HARNESS`, `LOUPE_MODEL`, `LOUPE_REASONING`,
+`LOUPE_PR_NUMBER`, `LOUPE_MODEL`, `LOUPE_REASONING`,
 `LOUPE_PROMPT_FILE`, `LOUPE_CONFIG`, `LOUPE_REVIEWER`, `LOUPE_DIR`,
 `LOUPE_CONVENTION_PATHS`, `LOUPE_CREDENTIAL_PROVIDERS`, `LOUPE_INFISICAL_ENV`,
 `LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`,
 `LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
 `LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
 `LOUPE_MAX_COMMENTS`, `LOUPE_PRIOR_COMMENTS`, `LOUPE_CROSS_REVIEWER_DEDUP`, `LOUPE_PROMPT_CACHE`.
+`LOUPE_HARNESS` (the deprecated `harness` input) is still read and must be empty
+or `whip`. The whip binary is `whipcode` on `PATH` unless `LOUPE_WHIP_BIN` says
+otherwise.
 Comment/chat mode is auto-detected from `GITHUB_EVENT_NAME` (`issue_comment` /
 `pull_request_review_comment`), which the runner sets.
 
@@ -149,5 +162,5 @@ read `steps.<id>.outputs.status`:
   retried for this kind, so it costs one call per reviewer, not two.
 - `rate-limit` — the provider throttled the call (HTTP 429, rate limit
   exceeded). Also not retried via the mode-switch fallback.
-- `failed` — any other failure (harness crash, transient error, etc.). The
+- `failed` — any other failure (a failed turn, a daemon that would not start, a transient error, etc.). The
   agentic→one-shot fallback still runs for unclassified errors.

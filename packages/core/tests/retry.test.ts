@@ -38,12 +38,13 @@ function fakeHarness(throwOnFirst: unknown): {
   const calls: { agentic?: boolean }[] = [];
   const harness: Harness = {
     name: "fake",
-    credentialKeys: [],
-    available: () => Promise.resolve(true),
     review: async (ctx) => {
       calls.push({ agentic: ctx.agentic });
       if (calls.length === 1) throw throwOnFirst;
-      return JSON.stringify({ summary: "", findings: [], concerns: [] });
+      return {
+        text: JSON.stringify({ summary: "", findings: [], concerns: [] }),
+        output: undefined,
+      };
     },
   };
   return { harness, calls };
@@ -56,7 +57,6 @@ async function runReviewWith(harness: Harness): Promise<unknown> {
     ref: { owner: "o", repo: "r", pull_number: 1 },
     harness,
     workdir: ".",
-    harnessEnv: {},
     conventionPaths: [],
     dryRun: true, // don't post
     full: true, // skip the incremental path (getLastReviewedSha/changedFilesBetween)

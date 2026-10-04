@@ -36,3 +36,7 @@ tasks:
     cmds:
       - task: format:fix
       - task: lint:fix
+  vendor:whip:
+    desc: Refresh vendor/@whip from a whip checkout (WHIP=../whip)
+    cmds:
+      - bun run scripts/vendor-whip.ts {{.WHIP | default "../whip"}}

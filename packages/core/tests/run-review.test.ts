@@ -227,8 +227,6 @@ function fakeHarness(script: {
   const contexts: HarnessContext[] = [];
   const harness: Harness = {
     name: "fake",
-    credentialKeys: [],
-    available: async () => true,
     review: async (ctx) => {
       contexts.push(ctx);
       const verifying = ctx.systemPrompt.startsWith(
@@ -248,7 +246,7 @@ function fakeHarness(script: {
           model: ctx.model,
           phase: ctx.phase,
         });
-        return output;
+        return { text: output, output: undefined };
       }
       if (ctx.agentic && script.agentic instanceof Error) {
         ctx.trace?.({
@@ -268,7 +266,7 @@ function fakeHarness(script: {
         model: ctx.model,
         phase: ctx.phase,
       });
-      return output;
+      return { text: output, output: undefined };
     },
   };
   return { harness, contexts };
@@ -293,8 +291,6 @@ function fakePerModelHarness(
   const contexts: HarnessContext[] = [];
   const harness: Harness = {
     name: "fake",
-    credentialKeys: [],
-    available: async () => true,
     review: async (ctx) => {
       contexts.push(ctx);
       const verifying = ctx.systemPrompt.startsWith(
@@ -308,7 +304,7 @@ function fakePerModelHarness(
           model: ctx.model,
           phase: ctx.phase,
         });
-        return output;
+        return { text: output, output: undefined };
       }
       const script = ctx.model ? byModel[ctx.model] : undefined;
       if (script instanceof Error) {
@@ -327,7 +323,7 @@ function fakePerModelHarness(
         model: ctx.model,
         phase: ctx.phase,
       });
-      return output;
+      return { text: output, output: undefined };
     },
   };
   return { harness, contexts };
@@ -344,7 +340,6 @@ function request(
     ref,
     harness,
     workdir,
-    harnessEnv: {},
     conventionPaths: ["AGENTS.md"],
     dirs: ["svc"],
     reviewerName: "code",

@@ -1,7 +1,7 @@
 # loupe docs
 
 AI pull-request reviewer: inline, line-anchored comments with a
-COMMENT / REQUEST_CHANGES verdict. Harness-agnostic, reviews against each repo's
+COMMENT / REQUEST_CHANGES verdict. Built on whip, reviews against each repo's
 own conventions, runs its focused reviewers agentically by default.
 
 ## How it works
@@ -13,7 +13,7 @@ Start at [how-it-works/README.md](how-it-works/README.md): triggers, the review 
 - [Guide](guide.md) — install, run a review locally, CLI flags, dry-run.
 - [Configuration](configuration.md) — `.loupe.json` reviewer profiles, model,
   reasoning, agentic mode, custom prompts, conventions.
-- [Credentials](credentials.md) — the provider chain and per-harness auth.
+- [Credentials](credentials.md) — the provider chain, local vs CI auth.
 - [GitHub Action](github-action.md) — wire loupe into CI, inputs, secrets.
 - [Review traces](review-traces.md) — reasoning/tool transcripts in the Actions
   step summary, and how to verify them locally.
@@ -23,4 +23,4 @@ Start at [how-it-works/README.md](how-it-works/README.md): triggers, the review 
 ## Maintainer docs
 
 - [Architecture](architecture.md) — packages, the review pipeline, key files,
-  how to extend (new harness, new credential provider).
+  how to extend (new agent, new credential provider).
