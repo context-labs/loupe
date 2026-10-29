@@ -250,13 +250,37 @@ async function runFix(
   );
 }
 
-/** Extract the triggering comment body from the GitHub event payload. */
-function readCommentBody(eventPath: string): string | undefined {
+/** The triggering comment plus the actor, read from the GitHub event payload. */
+interface CommentEvent {
+  body: string;
+  authorAssociation: string;
+  login: string;
+}
+
+/**
+ * GitHub's trusted-author tiers for a repo comment. Only these may drive chat:
+ * the command reaches agent execution, the full job secret set, and a branch
+ * push, and the documented copy-paste workflow does not always gate on this.
+ */
+const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+/** Extract the triggering comment and its actor from the GitHub event payload. */
+function readCommentEvent(eventPath: string): CommentEvent | undefined {
   const event: unknown = JSON.parse(readFileSync(eventPath, "utf8"));
   const parsed = z
-    .object({ comment: z.object({ body: z.string() }).optional() })
+    .object({
+      comment: z
+        .object({
+          body: z.string(),
+          author_association: z.string(),
+          user: z.object({ login: z.string() }),
+        })
+        .optional(),
+    })
     .safeParse(event);
-  return parsed.success ? parsed.data.comment?.body : undefined;
+  if (!parsed.success || !parsed.data.comment) return undefined;
+  const { body, author_association, user } = parsed.data.comment;
+  return { body, authorAssociation: author_association, login: user.login };
 }
 
 /**
@@ -269,8 +293,24 @@ export async function handleComment(
   logger: Logger,
 ): Promise<readonly ReviewerOutcome[] | undefined> {
   if (!config.eventPath) return;
-  const body = readCommentBody(config.eventPath);
-  if (!body || !MENTION.test(body)) {
+  const comment = readCommentEvent(config.eventPath);
+  if (!comment) return;
+
+  // Default-deny before any dispatch, ack, or harness spawn: an untrusted author
+  // must not reach agent execution, the job secrets, or a branch push. The
+  // documented chat workflow does not always carry the author gate, so enforce
+  // it in-product. Ignore silently — a comment reply here is an unauth-triggerable
+  // write.
+  if (!TRUSTED_ASSOCIATIONS.has(comment.authorAssociation)) {
+    logger.warn("Ignoring @loupe comment from untrusted author", {
+      login: comment.login,
+      authorAssociation: comment.authorAssociation,
+    });
+    return;
+  }
+
+  const body = comment.body;
+  if (!MENTION.test(body)) {
     logger.info("Comment does not mention @loupe; ignoring");
     return;
   }
