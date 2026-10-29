@@ -329,9 +329,13 @@ function shaFromMarker(
   prefix: string,
 ): string | undefined {
   if (!body) return undefined;
-  const start = body.indexOf(prefix);
+  // A comment body can carry attacker text that quotes our marker prefix (e.g.
+  // laundered into a finding), so take the LAST occurrence — loupe appends its
+  // authentic marker last — and require a full 40-char SHA. An abbreviation
+  // would let a forged early marker win a positional parse and suppress reviews.
+  const start = body.lastIndexOf(prefix);
   if (start < 0) return undefined;
-  return /sha=([0-9a-f]{7,40})\s*-->/.exec(body.slice(start))?.[1];
+  return /sha=([0-9a-f]{40})\s*-->/.exec(body.slice(start))?.[1];
 }
 
 async function listIssueComments(octokit: Octokit, ref: PullRef) {
@@ -946,7 +950,7 @@ export async function upsertCombinedSummary(
   const currentReviewers = new Set(
     [
       ...mergedBody.matchAll(
-        /<!-- loupe:summary:([^\s]+) sha=[0-9a-f]{7,40} -->/g,
+        /<!-- loupe:summary:([^\s]+) sha=[0-9a-f]{40} -->/g,
       ),
     ].map((match) => match[1]),
   );
@@ -954,7 +958,7 @@ export async function upsertCombinedSummary(
     .filter((comment) => comment.user?.login === self)
     .flatMap((comment) => [
       ...(comment.body?.matchAll(
-        /<!-- loupe:summary:([^\s]+) sha=[0-9a-f]{7,40} -->/g,
+        /<!-- loupe:summary:([^\s]+) sha=[0-9a-f]{40} -->/g,
       ) ?? []),
     ])
     .filter((match) => match[1] && !currentReviewers.has(match[1]))

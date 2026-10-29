@@ -9,6 +9,7 @@ import {
   type CredentialProvider,
 } from "@loupe/credentials";
 import type { WhipConfig } from "@loupe/harness";
+import { createRootLogger, type Logger } from "@loupe/logger";
 import { z } from "zod";
 
 import { asDirs, loadSettings, type LoupeSettings } from "./reviewers";
@@ -40,6 +41,10 @@ const envSchema = z.object({
     .string()
     .default("CLAUDE.md,AGENTS.md,.loupe.md,CONTRIBUTING.md"),
   LOUPE_CREDENTIAL_PROVIDERS: z.string().default("env"),
+  // Operator allow-list of permitted whip provider hosts (comma-separated).
+  // Non-empty = a PR's whip baseUrl host must be a member; empty = allow any
+  // host but warn. Opt-in so existing deployments keep working.
+  LOUPE_ALLOWED_PROVIDER_HOSTS: z.string().default(""),
   LOUPE_INFISICAL_ENV: z.string().optional(),
   LOUPE_INFISICAL_PROJECT_ID: z.string().optional(),
   LOUPE_DIR: optionalInput,
@@ -153,7 +158,9 @@ export type Config = {
   readonly eventPath?: string;
 };
 
-export function loadConfig(): Config {
+export function loadConfig(
+  logger: Logger = createRootLogger("loupe-config"),
+): Config {
   const env = envSchema.parse(process.env);
   const [owner, repo] = env.GITHUB_REPOSITORY.split("/") as [string, string];
   const workdir = env.GITHUB_WORKSPACE ?? process.cwd();
@@ -164,9 +171,15 @@ export function loadConfig(): Config {
   const configPath = env.LOUPE_CONFIG
     ? inWorkspace(env.LOUPE_CONFIG)
     : undefined;
+  const allowedProviderHosts = env.LOUPE_ALLOWED_PROVIDER_HOSTS.split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
   // Top-level review defaults from .loupe.json. Precedence for the movable
-  // settings: Action input (explicit) → file → loupe's built-in default.
-  const file: LoupeSettings = configPath ? loadSettings(configPath) : {};
+  // settings: Action input (explicit) → file → loupe's built-in default. The
+  // whip guard contains the PR-supplied provider host (see loadSettings).
+  const file: LoupeSettings = configPath
+    ? loadSettings(configPath, { allowedProviderHosts, logger })
+    : {};
 
   return {
     token: env.GITHUB_TOKEN,

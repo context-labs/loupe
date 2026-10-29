@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 import {
   HarnessError,
@@ -622,7 +622,14 @@ export async function produceReview(
       );
       refreshPaths = new Set();
       incremental = "unknown";
-    } else if (last.sha && last.sha !== pull.headSha) {
+    } else if (
+      last.sha &&
+      // An abbreviation of the head SHA is the same commit, not a new one.
+      // A plain `!==` would treat it as different, take the delta path, and
+      // compare head against itself (zero delta) — silently suppressing review.
+      !pull.headSha.startsWith(last.sha) &&
+      !last.sha.startsWith(pull.headSha)
+    ) {
       try {
         const delta = await changedFilesBetween(
           octokit,
@@ -1173,6 +1180,20 @@ async function verifyInline(
 }
 
 /**
+ * Resolve a config-supplied path against a trusted root and reject anything
+ * that escapes it. The path comes from the reviewed PR's `.loupe.json`, so an
+ * absolute path or `../` traversal must not reach a file outside the checkout.
+ */
+export function resolveWithin(root: string, relPath: string): string {
+  const base = resolve(root);
+  const abs = resolve(base, relPath);
+  if (abs !== base && !abs.startsWith(base + sep)) {
+    throw new Error(`Path "${relPath}" escapes the workspace root`);
+  }
+  return abs;
+}
+
+/**
  * Load skill docs from the checkout to fold into the reviewer. Each entry is a
  * path to a SKILL.md or a skill directory (SKILL.md is appended). Best-effort:
  * a missing skill is warned and skipped, never fatal.
@@ -1185,7 +1206,7 @@ function loadSkills(
   const out: string[] = [];
   for (const p of paths ?? []) {
     try {
-      const abs = join(workdir, p);
+      const abs = resolveWithin(workdir, p);
       const file =
         existsSync(abs) && statSync(abs).isDirectory()
           ? join(abs, "SKILL.md")
