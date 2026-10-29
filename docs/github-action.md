@@ -93,7 +93,8 @@ The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
 `LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`,
 `LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
 `LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
-`LOUPE_MAX_COMMENTS`, `LOUPE_PRIOR_COMMENTS`, `LOUPE_CROSS_REVIEWER_DEDUP`, `LOUPE_PROMPT_CACHE`.
+`LOUPE_MAX_COMMENTS`, `LOUPE_PRIOR_COMMENTS`, `LOUPE_CROSS_REVIEWER_DEDUP`, `LOUPE_PROMPT_CACHE`,
+`LOUPE_ALLOWED_PROVIDER_HOSTS` (whip provider-host allow-list; see [credentials.md](credentials.md)).
 Comment/chat mode is auto-detected from `GITHUB_EVENT_NAME` (`issue_comment` /
 `pull_request_review_comment`), which the runner sets.
 

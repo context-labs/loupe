@@ -30,7 +30,7 @@ whose globs match a changed file and posts each as its own labeled review
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | Label on the posted review; also the comment marker for de-dup. |
-| `prompt` or `promptFile` | one | Reviewer guidance. `promptFile` resolves relative to the config file. |
+| `prompt` or `promptFile` | one | Reviewer guidance. `promptFile` resolves relative to the config file and must stay inside the workspace (absolute paths, `../` traversal, and symlinks that point outside are rejected). |
 | `include` | no | Globs; reviewer runs only when a changed file matches. **Omit = the whole PR.** |
 | `dir` | no | One directory or a list. Overrides the top-level `dir` for this reviewer. |
 | `exclude` | no | Globs removed from scope (lockfiles, generated output, …). |
@@ -110,7 +110,8 @@ Load your repo's skill docs into the reviewer. Each entry is a path (relative to
 the checkout) to a `SKILL.md` or a skill directory; loupe reads them and folds
 them into the system prompt. This is how you enhance the underlying agent harness
 with your repo's own skills — the skills live in the **consuming repo**, not in
-loupe.
+loupe. A `skills` path must stay inside the checkout (absolute paths, `../`
+traversal, and symlinks pointing outside are rejected and skipped).
 
 Two scopes:
 - **Top-level `skills`** in `.loupe.json` — applied to **every** reviewer.
