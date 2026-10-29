@@ -115,7 +115,7 @@ function commandExists(cmd: string): Promise<boolean> {
  * stdout is logged at debug on completion so an empty or non-JSON response is
  * diagnosable. A non-zero exit rejects with stderr.
  */
-function runCli(
+export function runCli(
   cmd: string,
   args: readonly string[],
   stdin: string,
@@ -163,9 +163,12 @@ function runCli(
       log.debug("Harness stdout", { stdout });
       if (code === 0) {
         emit({ type: "done", text: stdout });
-        resolve(stdout);
+        // Redaction belongs on the value the harness RETURNS, not only on the
+        // trace copy: every publisher of the reply (PR comment, summary)
+        // inherits it from here.
+        resolve(redactSecrets(stdout, secrets));
       } else {
-        const message = `${cmd} exited ${code}: ${stderr.slice(0, 2000)}`;
+        const message = `${cmd} exited ${code}: ${redactSecrets(stderr.slice(0, 2000), secrets)}`;
         emit({ type: "error", error: message });
         reject(new HarnessError(message, classifyHarnessError(message)));
       }
@@ -233,7 +236,7 @@ export function codexHarness(): Harness {
  * observable instead of silent. Resolves with the assembled assistant text
  * (the review JSON), so the core parses it the same as any other harness.
  */
-function runWhipStreaming(
+export function runWhipStreaming(
   args: readonly string[],
   ctx: HarnessContext,
   binary = "whip",
@@ -299,7 +302,11 @@ function runWhipStreaming(
           }
           break;
         case "text":
-          if (typeof event["delta"] === "string") text += event["delta"];
+          // Accumulate the SCRUBBED delta: the assembled `text` is what the
+          // harness returns to every downstream publisher, so redaction has to
+          // happen here, not only on the trace copy `emit` builds.
+          if (typeof event["delta"] === "string")
+            text += scrub(event["delta"]) ?? "";
           if (text.length - logged >= 120) {
             log.info("streaming reply", { chars: text.length });
             logged = text.length;
@@ -318,7 +325,10 @@ function runWhipStreaming(
           });
           break;
         case "done":
-          final = typeof event["text"] === "string" ? event["text"] : text;
+          final =
+            typeof event["text"] === "string"
+              ? (scrub(event["text"]) ?? "")
+              : text;
           break;
         case "error": {
           const message = `whip error: ${JSON.stringify(event["error"])}`;
@@ -350,7 +360,7 @@ function runWhipStreaming(
       log.debug("Harness exited", { code, replyChars: out.length });
       if (code === 0) resolve(out);
       else {
-        const message = `whip exited ${code}: ${stderr.slice(0, 2000)}`;
+        const message = `whip exited ${code}: ${redactSecrets(stderr.slice(0, 2000), secrets)}`;
         reject(new HarnessError(message, classifyHarnessError(message)));
       }
     });
