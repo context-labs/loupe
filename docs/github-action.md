@@ -51,7 +51,8 @@ jobs:
   chat:
     if: >-
       github.event.issue.pull_request != null &&
-      contains(github.event.comment.body, '@loupe')
+      contains(github.event.comment.body, '@loupe') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +65,10 @@ Commands: `@loupe review` (re-review the whole PR), `@loupe fix` (fix all open
 Loupe findings in one commit), `@loupe fix <what>` (make a specific change and
 push it to the PR branch), `@loupe <question>` (answer grounded
 in the diff), `@loupe help`. loupe auto-detects the comment event and switches to
-chat mode; a comment without `@loupe` is ignored.
+chat mode; a comment without `@loupe` is ignored. loupe also ignores comments
+from untrusted authors (author association outside `OWNER`/`MEMBER`/`COLLABORATOR`)
+regardless of the workflow `if:`, so the `author_association` gate above is
+defense in depth, not the only check.
 
 `@loupe fix` needs the chat job to have `permissions: contents: write` (to push)
 and only works on same-repo branches, not forks.
