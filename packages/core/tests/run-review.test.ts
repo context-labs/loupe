@@ -797,6 +797,33 @@ describe("runReview end to end", () => {
     expect(summary).not.toContain("⚠️ degraded run");
   });
 
+  it("prior SHA equal to an abbreviation of the head is the same commit, not a zero-delta suppression (F-92)", async () => {
+    // A forged/abbreviated prior-review SHA that is a prefix of the head must
+    // not take the delta path: an empty head-vs-head compare would return zero
+    // changed files and silently suppress the review (emptyProduced, nothing
+    // posted). The hardened markers + gate treat it as the same commit instead.
+    const api = fakeOctokit({
+      priorSummarySha: SHA_B.slice(0, 12),
+      compare: [],
+      threads: [],
+    });
+    const { harness } = fakeHarness({
+      agentic: reviewJson([
+        { path: "svc/a.ts", line: 2, severity: "warning", body: "A is wrong" },
+      ]),
+      verify: verifyAll(1),
+    });
+
+    const result = await runReview(request(api, harness, checkout()));
+
+    // Not suppressed: a full review ran and its finding posted.
+    expect(result.diagnostics.incremental).toBe("full");
+    expect(result.inline.map((f) => `${f.path}:${f.line}`)).toEqual([
+      "svc/a.ts:2",
+    ]);
+    expect(api.calls).toContain("createReview");
+  });
+
   it("history lookup failure: full review, prior threads untouched, run marked degraded", async () => {
     const api = fakeOctokit({
       listCommentsError: new Error("rate limited"),
