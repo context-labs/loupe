@@ -94,8 +94,30 @@ export type WhipGuard = {
 };
 
 /**
- * Enforce the operator allow-list on the whip provider host. Precedence: a
- * NON-EMPTY allow-list is a hard requirement (host must be a member); an
+ * Job-infrastructure secrets that are present in the harness env (it inherits
+ * `process.env`) but are never a legitimate model-provider key. `apiKeyEnv` is
+ * the variable whose VALUE whip sends to `baseUrl` as the credential, so a PR
+ * that names one of these would exfiltrate the job's own token/cloud creds to
+ * the provider host. Rejected on the untrusted-PR path regardless of the host
+ * allow-list — a shape check alone (any UPPER_SNAKE name) does not stop this.
+ */
+const BLOCKED_API_KEY_ENVS: readonly RegExp[] = [
+  /^GITHUB_/,
+  /^GH_/,
+  /^ACTIONS_/,
+  /^RUNNER_/,
+  /^AWS_/,
+  /^AZURE_/,
+  /^GOOGLE_/,
+  /^GCP_/,
+  /^INFISICAL_/,
+  /^LOUPE_/,
+];
+
+/**
+ * Enforce the operator constraints on the PR-supplied whip provider block.
+ * `apiKeyEnv` may never name a job-infrastructure secret. For the host:
+ * a NON-EMPTY allow-list is a hard requirement (host must be a member); an
  * UNSET/empty list preserves current behavior but warns, so there is a safe
  * opt-in without breaking existing deployments. baseUrl is already a validated
  * https URL by the schema.
@@ -104,6 +126,12 @@ function enforceWhipGuard(
   whip: z.infer<typeof whipConfigSchema>,
   guard: WhipGuard,
 ): void {
+  const apiKeyEnv = whip.provider.apiKeyEnv;
+  if (BLOCKED_API_KEY_ENVS.some((re) => re.test(apiKeyEnv))) {
+    throw new Error(
+      `provider apiKeyEnv "${apiKeyEnv}" names a job-infrastructure secret and cannot be used as a provider credential`,
+    );
+  }
   const host = new URL(whip.provider.baseUrl).host.toLowerCase();
   if (guard.allowedProviderHosts.length === 0) {
     guard.logger.warn(

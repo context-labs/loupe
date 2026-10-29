@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -1187,8 +1188,22 @@ async function verifyInline(
 export function resolveWithin(root: string, relPath: string): string {
   const base = resolve(root);
   const abs = resolve(base, relPath);
-  if (abs !== base && !abs.startsWith(base + sep)) {
+  const contains = (parent: string, child: string): boolean =>
+    child === parent || child.startsWith(parent + sep);
+  if (!contains(base, abs)) {
     throw new Error(`Path "${relPath}" escapes the workspace root`);
+  }
+  // `resolve` is purely lexical, so the check above still passes a symlink that
+  // points out of the tree. A fork author controls `.loupe.json` and the
+  // checkout (actions/checkout materializes symlinks), so follow the links:
+  // compare the REAL path against the REAL root. A path that does not exist yet
+  // cannot be a symlink escape at read time, so the lexical check stands for it.
+  if (existsSync(abs)) {
+    const realBase = realpathSync(base);
+    const real = realpathSync(abs);
+    if (!contains(realBase, real)) {
+      throw new Error(`Path "${relPath}" escapes the workspace root`);
+    }
   }
   return abs;
 }

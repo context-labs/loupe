@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -130,6 +130,18 @@ describe("promptFile containment (F-90)", () => {
     });
     expect(() => loadReviewers(p)).toThrow(/escapes the workspace root/);
   });
+
+  it("rejects an in-workspace symlink that points outside the workspace", () => {
+    // A fork author controls the checkout, so a symlink that passes the lexical
+    // containment check must still be rejected once its target is resolved.
+    const outside = mkdtempSync(join(tmpdir(), "loupe-secret-"));
+    writeFileSync(join(outside, "creds"), "secret");
+    const p = config({
+      reviewers: [{ name: "code", promptFile: "link" }],
+    });
+    symlinkSync(join(outside, "creds"), join(dirname(p), "link"));
+    expect(() => loadReviewers(p)).toThrow(/escapes the workspace root/);
+  });
 });
 
 describe("whip provider egress validation (F-90)", () => {
@@ -190,5 +202,17 @@ describe("whip provider egress validation (F-90)", () => {
       loadSettings(p, { allowedProviderHosts: [], logger }).whip,
     ).toBeDefined();
     expect(logger.warn).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an apiKeyEnv naming a job-infrastructure secret, even with an empty allow-list", () => {
+    const p = config(
+      whip({
+        baseUrl: "https://api.inference.net/v1",
+        apiKeyEnv: "GITHUB_TOKEN",
+      }),
+    );
+    expect(() => loadSettings(p, { allowedProviderHosts: [], logger })).toThrow(
+      /job-infrastructure secret/,
+    );
   });
 });
