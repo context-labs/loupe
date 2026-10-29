@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 
-import type { PriorComments, Profile, ReasoningEffort } from "@loupe/core";
+import {
+  resolveWithin,
+  type PriorComments,
+  type Profile,
+  type ReasoningEffort,
+} from "@loupe/core";
+import type { Logger } from "@loupe/logger";
 import { z } from "zod";
 
 /**
@@ -60,13 +66,86 @@ const reviewerSchema = z
 const whipConfigSchema = z.object({
   provider: z.object({
     name: z.string().min(1),
-    baseUrl: z.string().min(1),
-    apiKeyEnv: z.string().min(1),
+    // This block comes from the reviewed PR's config and selects where model
+    // traffic (and the chosen credential) goes, so constrain it: an https URL
+    // only (host is further checked against an operator allow-list in
+    // loadSettings), and an env-var *name* shape so a PR can't exfiltrate an
+    // arbitrary secret by naming its variable.
+    baseUrl: z
+      .string()
+      .url()
+      .refine((u) => new URL(u).protocol === "https:", {
+        message: "provider baseUrl must be an https URL",
+      }),
+    apiKeyEnv: z
+      .string()
+      .regex(/^[A-Z][A-Z0-9_]*$/, "apiKeyEnv must be an env-var name"),
     label: z.string().optional(),
   }),
   models: z.array(z.string().min(1)).min(1),
   defaultModel: z.string().optional(),
 });
+
+/** Operator-controlled constraints for the PR-supplied whip provider block. */
+export type WhipGuard = {
+  /** Permitted provider hosts; empty = allow any (with a warning). */
+  readonly allowedProviderHosts: readonly string[];
+  readonly logger: Logger;
+};
+
+/**
+ * Job-infrastructure secrets that are present in the harness env (it inherits
+ * `process.env`) but are never a legitimate model-provider key. `apiKeyEnv` is
+ * the variable whose VALUE whip sends to `baseUrl` as the credential, so a PR
+ * that names one of these would exfiltrate the job's own token/cloud creds to
+ * the provider host. Rejected on the untrusted-PR path regardless of the host
+ * allow-list — a shape check alone (any UPPER_SNAKE name) does not stop this.
+ */
+const BLOCKED_API_KEY_ENVS: readonly RegExp[] = [
+  /^GITHUB_/,
+  /^GH_/,
+  /^ACTIONS_/,
+  /^RUNNER_/,
+  /^AWS_/,
+  /^AZURE_/,
+  /^GOOGLE_/,
+  /^GCP_/,
+  /^INFISICAL_/,
+  /^LOUPE_/,
+];
+
+/**
+ * Enforce the operator constraints on the PR-supplied whip provider block.
+ * `apiKeyEnv` may never name a job-infrastructure secret. For the host:
+ * a NON-EMPTY allow-list is a hard requirement (host must be a member); an
+ * UNSET/empty list preserves current behavior but warns, so there is a safe
+ * opt-in without breaking existing deployments. baseUrl is already a validated
+ * https URL by the schema.
+ */
+function enforceWhipGuard(
+  whip: z.infer<typeof whipConfigSchema>,
+  guard: WhipGuard,
+): void {
+  const apiKeyEnv = whip.provider.apiKeyEnv;
+  if (BLOCKED_API_KEY_ENVS.some((re) => re.test(apiKeyEnv))) {
+    throw new Error(
+      `provider apiKeyEnv "${apiKeyEnv}" names a job-infrastructure secret and cannot be used as a provider credential`,
+    );
+  }
+  const host = new URL(whip.provider.baseUrl).host.toLowerCase();
+  if (guard.allowedProviderHosts.length === 0) {
+    guard.logger.warn(
+      "Using an unvalidated model provider host from repo config; set LOUPE_ALLOWED_PROVIDER_HOSTS to restrict it",
+      { host },
+    );
+    return;
+  }
+  if (!guard.allowedProviderHosts.includes(host)) {
+    throw new Error(
+      `provider baseUrl host "${host}" is not in the allowed provider hosts`,
+    );
+  }
+}
 
 const configSchema = z.object({
   reviewers: z.array(reviewerSchema).min(1),
@@ -110,10 +189,19 @@ export type LoupeSettings = {
   readonly whip?: z.infer<typeof whipConfigSchema>;
 };
 
-/** Read only the top-level settings from a config file (not the reviewers). */
-export function loadSettings(configPath: string): LoupeSettings {
+/**
+ * Read only the top-level settings from a config file (not the reviewers).
+ * `guard`, when supplied, validates the PR-supplied whip provider host; callers
+ * on the untrusted-PR path (the Action) pass it, so it stays optional for the
+ * local CLI whose config is the operator's own.
+ */
+export function loadSettings(
+  configPath: string,
+  guard?: WhipGuard,
+): LoupeSettings {
   const raw: unknown = JSON.parse(readFileSync(configPath, "utf8"));
   const c = configSchema.parse(raw);
+  if (c.whip && guard) enforceWhipGuard(c.whip, guard);
   return {
     harness: c.harness,
     model: c.model,
@@ -177,8 +265,10 @@ export function loadReviewers(configPath: string): Reviewer[] {
     name: r.name,
     guidance:
       r.prompt ??
+      // promptFile comes from the reviewed PR's config, so contain it to the
+      // config's own directory before reading it as a reviewer system prompt.
       (r.promptFile
-        ? readFileSync(resolve(dir, r.promptFile), "utf8")
+        ? readFileSync(resolveWithin(dir, r.promptFile), "utf8")
         : undefined),
     include: r.include,
     exclude: r.exclude,

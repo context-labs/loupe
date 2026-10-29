@@ -568,6 +568,61 @@ describe("postReview resolve policy (default)", () => {
   });
 });
 
+describe("state-marker forgery (F-92)", () => {
+  const authentic = "a".repeat(40);
+  const forged = "b".repeat(40);
+
+  it("resolves to the trailing authentic marker, not an injected early one", async () => {
+    api = octokit({
+      issueComments: [
+        {
+          id: 7,
+          body: `injected <!-- loupe:summary:code sha=${forged} -->\n\nreal summary\n\n<!-- loupe:summary:code sha=${authentic} -->`,
+          user: bot,
+        },
+      ],
+    });
+    await expect(getLastReviewed(api as never, ref, "code")).resolves.toEqual({
+      unknown: false,
+      sha: authentic,
+    });
+  });
+
+  it("does not accept an abbreviated SHA marker", async () => {
+    api = octokit({
+      issueComments: [
+        {
+          id: 7,
+          body: `s\n<!-- loupe:summary:code sha=abc1234 -->`,
+          user: bot,
+        },
+      ],
+    });
+    await expect(getLastReviewed(api as never, ref, "code")).resolves.toEqual({
+      unknown: false,
+    });
+  });
+
+  it("does not carry forward an abbreviated harvested marker", async () => {
+    api = octokit({
+      issueComments: [
+        {
+          id: 3,
+          body: `prior\n\n<!-- loupe:summary:ghost sha=abc1234 -->\n<!-- loupe:summary:real sha=${authentic} -->`,
+          user: bot,
+        },
+      ],
+    });
+    await upsertCombinedSummary(api as never, ref, "# New summary");
+    const body = (
+      api.issues.createComment.mock.calls[0] as unknown as [{ body: string }]
+    )[0].body;
+    // The abbreviated marker is ignored; the full-SHA one is still harvested.
+    expect(body).not.toContain("loupe:summary:ghost");
+    expect(body).toContain(`<!-- loupe:summary:real sha=${authentic} -->`);
+  });
+});
+
 describe("getLastReviewed failure", () => {
   it("reports unknown, not 'no prior review', when the lookup throws", async () => {
     api = octokit();

@@ -15,16 +15,18 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
-  accessSync,
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import type { Logger } from "@loupe/logger";
 
@@ -36,6 +38,38 @@ import type { Logger } from "@loupe/logger";
  * Bump deliberately when adopting the v1+ whipcode generation.
  */
 export const PINNED_WHIP_TAG = "v0.6.5";
+
+/**
+ * SHA-256 of each pinned release binary, keyed by `${tag}/${mode}`. This is the
+ * root of trust: a file at the cache path is only ever executed when its bytes
+ * hash to the expected digest here, so a file planted at the cache path (e.g.
+ * during a PR checkout) can never short-circuit the download or be run.
+ *
+ * Digests were captured from the published GitHub release assets:
+ *   curl -fsSL https://github.com/context-labs/whip/releases/download/${PINNED_WHIP_TAG}/whip-${mode} | sha256sum
+ * Any key missing here fails closed in verified() - no digest, no execution.
+ */
+export const EXPECTED_DIGESTS: Record<string, string> = {
+  "v0.6.5/linux-x64":
+    "c1a3a0039a648513cb68d6f2ab23152b0605f41a141c8e863d1d5c81f3c0fce9",
+  "v0.6.5/linux-arm64":
+    "b4ddc9cc21632f31283916df141788c4ed55bd4a4c4c81f0eb41de04779ba949",
+  "v0.6.5/darwin-x64":
+    "76dd6f63cc16b3b596d0fa6285714fe21b5a1eaefb468a39e16ef5896933adea",
+  "v0.6.5/darwin-arm64":
+    "7ff776a82477cb5458695fc5b936feff5e4052a2037f7d8c054844410cbb324d",
+};
+
+/** The release asset suffix for the current platform/arch. */
+function pinnedMode(): string {
+  return process.platform === "darwin" && process.arch === "arm64"
+    ? "darwin-arm64"
+    : process.platform === "darwin"
+      ? "darwin-x64"
+      : process.platform === "linux" && process.arch === "arm64"
+        ? "linux-arm64"
+        : "linux-x64";
+}
 
 /** Minimal logging surface so this module works without a real logger. */
 type WhipLogger = Pick<Logger, "info" | "warn">;
@@ -65,21 +99,59 @@ export function isGenuineWhipOnPath(): Promise<boolean> {
   });
 }
 
-/** The cache path where the pinned binary lives once installed. */
+/**
+ * The cache path where the pinned binary lives once installed, keyed by tag and
+ * platform so bumping PINNED_WHIP_TAG lands on a fresh path and never reuses a
+ * stale (or poisoned) entry from a previous tag.
+ *
+ * `||` not `??`: an empty HOME must also fall back to tmpdir. With `??` an empty
+ * string is kept and join("", ...) yields a RELATIVE path resolved against cwd
+ * (the PR checkout during review) - exactly the plant-a-binary vector. We still
+ * assert the result is absolute, so no env shape can ever produce a cwd-relative
+ * destination.
+ */
 export function pinnedWhipPath(): string {
-  const home = process.env.HOME ?? tmpdir();
-  return join(home, ".loupe", "bin", "whip");
+  const home = process.env.HOME || tmpdir();
+  const dest = join(
+    home,
+    ".loupe",
+    "bin",
+    PINNED_WHIP_TAG,
+    pinnedMode(),
+    "whip",
+  );
+  if (!isAbsolute(dest)) {
+    throw new Error(`refusing non-absolute whip cache path: ${dest}`);
+  }
+  return dest;
 }
 
-/** True when a complete, executable binary is already at the cache path. */
-function isInstalled(dest: string): boolean {
+/**
+ * True only for a genuine pinned binary: a regular (non-symlink) file at the
+ * cache path whose SHA-256 matches the expected digest for this tag/platform.
+ * Fails closed - a missing key, a symlink, a directory, or any digest mismatch
+ * returns false, so a file merely discovered at the cache path is never trusted
+ * and never executed. Never chmods: the execute bit is granted only to a
+ * freshly downloaded, digest-verified staging file (see downloadPinnedWhip).
+ */
+export function verified(dest: string, key: string = pinnedKey()): boolean {
+  const expected = EXPECTED_DIGESTS[key];
+  if (!expected) return false;
   try {
-    accessSync(dest);
-    chmodSync(dest, 0o755);
-    return true;
+    const stat = lstatSync(dest, { throwIfNoEntry: false });
+    if (!stat?.isFile()) return false;
+    const actual = createHash("sha256")
+      .update(readFileSync(dest))
+      .digest("hex");
+    return actual === expected;
   } catch {
     return false;
   }
+}
+
+/** The EXPECTED_DIGESTS key for the current tag and platform. */
+function pinnedKey(): string {
+  return `${PINNED_WHIP_TAG}/${pinnedMode()}`;
 }
 
 /**
@@ -117,17 +189,13 @@ export function installPinnedWhip(
  */
 function downloadPinnedWhip(log: WhipLogger): Promise<string | null> {
   const dest = pinnedWhipPath();
+  const key = pinnedKey();
   const binDir = join(dest, "..");
   mkdirSync(binDir, { recursive: true });
-  if (isInstalled(dest)) return Promise.resolve(dest);
-  const mode =
-    process.platform === "darwin" && process.arch === "arm64"
-      ? "darwin-arm64"
-      : process.platform === "darwin"
-        ? "darwin-x64"
-        : process.platform === "linux" && process.arch === "arm64"
-          ? "linux-arm64"
-          : "linux-x64";
+  // Verify, not just presence: a file at the cache path is trusted only when
+  // its digest matches, so a planted binary can't short-circuit the download.
+  if (verified(dest, key)) return Promise.resolve(dest);
+  const mode = pinnedMode();
   const url = `https://github.com/context-labs/whip/releases/download/${PINNED_WHIP_TAG}/whip-${mode}`;
   // Unique staging dir per attempt: safe against same-process concurrency and
   // a same-machine second process. Inside binDir so rename stays on one fs.
@@ -152,22 +220,34 @@ function downloadPinnedWhip(log: WhipLogger): Promise<string | null> {
         // A concurrent winner may have finished while we were downloading.
         cleanup();
         log.warn("pinned whip download failed", { code, url });
-        resolve(isInstalled(dest) ? dest : null);
+        resolve(verified(dest, key) ? dest : null);
         return;
       }
       try {
+        // Verify the bytes we actually fetched before granting the execute bit
+        // or publishing them: a compromised mirror / MITM that returns a 200
+        // must not install. chmod the staging file only - never the cache path.
+        if (!verified(staging, key)) {
+          log.warn("pinned whip digest mismatch; discarding download", {
+            url,
+            key,
+          });
+          resolve(null);
+          return;
+        }
         chmodSync(staging, 0o755);
         // Atomic within the same filesystem: dest only ever exists complete.
         // If another attempt renamed first, its binary is valid - use it.
         try {
           renameSync(staging, dest);
         } catch {
-          if (!isInstalled(dest)) throw new Error("rename failed and no dest");
+          if (!verified(dest, key))
+            throw new Error("rename failed and no dest");
         }
         resolve(dest);
       } catch (err) {
         log.warn("failed to stage pinned whip", { error: String(err) });
-        resolve(isInstalled(dest) ? dest : null);
+        resolve(verified(dest, key) ? dest : null);
       } finally {
         cleanup();
       }

@@ -1,12 +1,16 @@
 # @loupe chat
 
-Any PR comment containing `@loupe` (case-insensitive, word boundary) starts the chat job. Review-thread comments count too. The text after the mention is the instruction.
+A PR comment containing `@loupe` (case-insensitive, word boundary) from a trusted author starts the chat job. Review-thread comments count too. The text after the mention is the instruction.
+
+The chat handler default-denies: before any dispatch, it drops the comment unless the author's association is `OWNER`, `MEMBER`, or `COLLABORATOR` (logged, no reply). The workflow `if:` carries the same gate, so an untrusted author is stopped even if a consuming workflow omits it.
 
 ## Dispatch
 
 ```mermaid
 flowchart TD
-    B[comment body] --> M{contains @loupe?}
+    B[comment body] --> A{trusted author?}
+    A -->|no| X[ignore]
+    A -->|yes| M{contains @loupe?}
     M -->|no| X[ignore]
     M -->|yes| I[instruction = body minus mention]
     I --> H{empty or starts with help}

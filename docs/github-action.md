@@ -51,7 +51,8 @@ jobs:
   chat:
     if: >-
       github.event.issue.pull_request != null &&
-      contains(github.event.comment.body, '@loupe')
+      contains(github.event.comment.body, '@loupe') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +65,10 @@ Commands: `@loupe review` (re-review the whole PR), `@loupe fix` (fix all open
 Loupe findings in one commit), `@loupe fix <what>` (make a specific change and
 push it to the PR branch), `@loupe <question>` (answer grounded
 in the diff), `@loupe help`. loupe auto-detects the comment event and switches to
-chat mode; a comment without `@loupe` is ignored.
+chat mode; a comment without `@loupe` is ignored. loupe also ignores comments
+from untrusted authors (author association outside `OWNER`/`MEMBER`/`COLLABORATOR`)
+regardless of the workflow `if:`, so the `author_association` gate above is
+defense in depth, not the only check.
 
 `@loupe fix` needs the chat job to have `permissions: contents: write` (to push)
 and only works on same-repo branches, not forks.
@@ -89,7 +93,8 @@ The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
 `LOUPE_INFISICAL_PROJECT_ID`, `LOUPE_PROFILE`, `LOUPE_VERIFY`, `LOUPE_FULL`,
 `LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
 `LOUPE_ENSEMBLE`, `LOUPE_SKILLS`, `LOUPE_TIMEZONE`, `LOUPE_MAX_TURNS`,
-`LOUPE_MAX_COMMENTS`, `LOUPE_PRIOR_COMMENTS`, `LOUPE_CROSS_REVIEWER_DEDUP`, `LOUPE_PROMPT_CACHE`.
+`LOUPE_MAX_COMMENTS`, `LOUPE_PRIOR_COMMENTS`, `LOUPE_CROSS_REVIEWER_DEDUP`, `LOUPE_PROMPT_CACHE`,
+`LOUPE_ALLOWED_PROVIDER_HOSTS` (whip provider-host allow-list; see [credentials.md](credentials.md)).
 Comment/chat mode is auto-detected from `GITHUB_EVENT_NAME` (`issue_comment` /
 `pull_request_review_comment`), which the runner sets.
 

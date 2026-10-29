@@ -38,3 +38,23 @@ and a genuinely missing key surfaces as the harness's own auth error (visible at
 The harness runs on the runner, so its key must reach the job env. With whip +
 inference.net, expose `INFERENCE_API_KEY` to the job (e.g. via Infisical) and the
 `env` provider forwards it. See [github-action.md](github-action.md).
+
+## Repo-supplied provider block (`.loupe.json` `whip`)
+
+`.loupe.json` is read from the checked-out PR head, so on a fork/untrusted PR
+the `whip.provider` block is attacker-controlled. It selects where model traffic
+goes (`baseUrl`) and which env var's value is sent as the credential
+(`apiKeyEnv`), so it is constrained:
+
+- `baseUrl` must be an `https:` URL.
+- Host allow-list — env `LOUPE_ALLOWED_PROVIDER_HOSTS` (comma-separated, Action
+  only). **Set** → the `baseUrl` host must be a member or the run fails.
+  **Unset/empty** → any host is allowed but a warning is logged. Opt-in so
+  existing deployments keep working; set it on repos that accept fork PRs.
+- `apiKeyEnv` must be an env-var name and may not name a job-infrastructure
+  secret (`GITHUB_*`, `GH_*`, `ACTIONS_*`, `RUNNER_*`, `AWS_*`, `AZURE_*`,
+  `GOOGLE_*`, `GCP_*`, `INFISICAL_*`, `LOUPE_*`) — those are present in the job
+  env but are never a provider key, and naming one would send it to `baseUrl`.
+
+The local CLI does not apply these (its config is the operator's own, not an
+untrusted PR).

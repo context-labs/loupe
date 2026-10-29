@@ -103,9 +103,18 @@ const logger = {
   child: vi.fn(),
 } as unknown as Logger;
 
-function eventConfig(body: string): Config {
+function eventConfig(
+  body: string,
+  authorAssociation = "OWNER",
+  login = "trusted-user",
+): Config {
   const path = join(tmpdir(), `loupe-event-${Math.random()}.json`);
-  writeFileSync(path, JSON.stringify({ comment: { body } }));
+  writeFileSync(
+    path,
+    JSON.stringify({
+      comment: { body, author_association: authorAssociation, user: { login } },
+    }),
+  );
   return {
     token: "t",
     owner: "acme",
@@ -182,4 +191,51 @@ describe("handleComment re-review completion gate", () => {
     expect(body).toContain("closed before loupe could publish");
     expect(body).not.toContain("Re-review of");
   });
+});
+
+describe("handleComment author authorization gate", () => {
+  const untrusted = ["NONE", "CONTRIBUTOR", "FIRST_TIMER"];
+  const commands = [
+    "@loupe review",
+    "@loupe fix",
+    "@loupe is this safe?",
+    "@loupe help",
+  ];
+
+  for (const association of untrusted) {
+    for (const command of commands) {
+      it(`ignores "${command}" from ${association}`, async () => {
+        state.merged = false;
+        state.closed = false;
+        postIssueComment.mockClear();
+        updateIssueComment.mockClear();
+        runReviews.mockClear();
+
+        await handleComment(eventConfig(command, association), logger);
+
+        expect(postIssueComment).not.toHaveBeenCalled();
+        expect(updateIssueComment).not.toHaveBeenCalled();
+        expect(runReviews).not.toHaveBeenCalled();
+      });
+    }
+  }
+
+  for (const association of ["OWNER", "MEMBER", "COLLABORATOR"]) {
+    it(`dispatches @loupe review from ${association}`, async () => {
+      state.merged = false;
+      state.closed = false;
+      postIssueComment.mockClear();
+      updateIssueComment.mockClear();
+      runReviews.mockClear();
+      runReviews.mockResolvedValueOnce([
+        { name: "code", ok: true, result: cleanResult },
+      ]);
+
+      await handleComment(eventConfig("@loupe review", association), logger);
+
+      expect(runReviews).toHaveBeenCalledTimes(1);
+      expect(postIssueComment).toHaveBeenCalledTimes(1);
+      expect(updateIssueComment).toHaveBeenCalledTimes(1);
+    });
+  }
 });
