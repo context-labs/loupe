@@ -331,7 +331,10 @@ export function runWhipStreaming(
               : text;
           break;
         case "error": {
-          const message = `whip error: ${JSON.stringify(event["error"])}`;
+          // The error payload can echo provider responses or the agent's own
+          // text, which may carry a known secret; this message reaches a PR
+          // failure comment, so it is scrubbed like every other egress copy.
+          const message = `whip error: ${scrub(JSON.stringify(event["error"])) ?? ""}`;
           reject(new HarnessError(message, classifyHarnessError(message)));
           break;
         }

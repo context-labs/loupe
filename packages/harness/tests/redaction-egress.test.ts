@@ -84,6 +84,20 @@ describe("runWhipStreaming redacts secrets from the returned reply", () => {
         e.message.includes(REDACTION_MARK),
     );
   });
+
+  it("scrubs the secret out of a whip error event's thrown message", async () => {
+    const script = node(
+      `process.stdout.write(JSON.stringify({type:"error",error:"provider said ${SECRET}"})+"\\n");process.exit(0);`,
+    );
+    await expect(
+      runWhipStreaming(script.args, ctx(), script.bin),
+    ).rejects.toSatisfy(
+      (e: unknown) =>
+        e instanceof HarnessError &&
+        !e.message.includes(SECRET) &&
+        e.message.includes(REDACTION_MARK),
+    );
+  });
 });
 
 describe("runCli redacts secrets from the resolved reply", () => {
