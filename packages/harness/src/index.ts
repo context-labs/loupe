@@ -118,6 +118,18 @@ const CHILD_ENV_SAFELIST = [
   "LC_ALL",
   "SHELL",
   "USER",
+  // Proxy / TLS config a runner may need to reach the provider. Non-secret
+  // infrastructure settings, not credentials — a proxied/corporate runner can't
+  // make outbound HTTPS without them.
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
 ] as const;
 
 /**
