@@ -11,11 +11,16 @@ const {
   postIssueComment,
   updateIssueComment,
   pullsGet,
+  getCollaboratorPermissionLevel,
   runReviews,
   state,
   cleanResult,
 } = vi.hoisted(() => ({
   postIssueComment: vi.fn(async () => ({ data: { id: 42 } })),
+  // Default: the actor has push access. Individual tests override per case.
+  getCollaboratorPermissionLevel: vi.fn(async () => ({
+    data: { permission: "write" },
+  })),
   updateIssueComment: vi.fn(
     async (_o: unknown, _r: unknown, _id: number, _body: string) => undefined,
   ),
@@ -60,7 +65,10 @@ pullsGet.mockImplementation(async () => ({
 }));
 
 vi.mock("@loupe/core", () => ({
-  makeOctokit: () => ({ pulls: { get: pullsGet } }),
+  makeOctokit: () => ({
+    pulls: { get: pullsGet },
+    repos: { getCollaboratorPermissionLevel },
+  }),
   postIssueComment,
   updateIssueComment,
   fetchPullContext: vi.fn(async () => ({
@@ -220,22 +228,65 @@ describe("handleComment author authorization gate", () => {
     }
   }
 
-  for (const association of ["OWNER", "MEMBER", "COLLABORATOR"]) {
-    it(`dispatches @loupe review from ${association}`, async () => {
+  for (const permission of ["write", "admin"]) {
+    for (const association of ["OWNER", "MEMBER", "COLLABORATOR"]) {
+      it(`dispatches @loupe review from ${association} with ${permission} permission`, async () => {
+        state.merged = false;
+        state.closed = false;
+        postIssueComment.mockClear();
+        updateIssueComment.mockClear();
+        runReviews.mockClear();
+        getCollaboratorPermissionLevel.mockResolvedValueOnce({
+          data: { permission },
+        });
+        runReviews.mockResolvedValueOnce([
+          { name: "code", ok: true, result: cleanResult },
+        ]);
+
+        await handleComment(eventConfig("@loupe review", association), logger);
+
+        expect(runReviews).toHaveBeenCalledTimes(1);
+        expect(postIssueComment).toHaveBeenCalledTimes(1);
+        expect(updateIssueComment).toHaveBeenCalledTimes(1);
+      });
+    }
+  }
+
+  // author_association is not an authz signal: a read-only actor is denied even
+  // when GitHub reports them as a MEMBER or COLLABORATOR.
+  for (const association of ["MEMBER", "COLLABORATOR"]) {
+    it(`denies @loupe fix from ${association} with read-only permission`, async () => {
       state.merged = false;
       state.closed = false;
       postIssueComment.mockClear();
       updateIssueComment.mockClear();
       runReviews.mockClear();
-      runReviews.mockResolvedValueOnce([
-        { name: "code", ok: true, result: cleanResult },
-      ]);
+      getCollaboratorPermissionLevel.mockResolvedValueOnce({
+        data: { permission: "read" },
+      });
 
-      await handleComment(eventConfig("@loupe review", association), logger);
+      await handleComment(eventConfig("@loupe fix", association), logger);
 
-      expect(runReviews).toHaveBeenCalledTimes(1);
-      expect(postIssueComment).toHaveBeenCalledTimes(1);
-      expect(updateIssueComment).toHaveBeenCalledTimes(1);
+      expect(postIssueComment).not.toHaveBeenCalled();
+      expect(updateIssueComment).not.toHaveBeenCalled();
+      expect(runReviews).not.toHaveBeenCalled();
     });
   }
+
+  it("fails closed when the permission API throws", async () => {
+    state.merged = false;
+    state.closed = false;
+    postIssueComment.mockClear();
+    updateIssueComment.mockClear();
+    runReviews.mockClear();
+    getCollaboratorPermissionLevel.mockRejectedValueOnce(
+      new Error("API unavailable"),
+    );
+
+    await handleComment(eventConfig("@loupe review", "OWNER"), logger);
+
+    expect(postIssueComment).not.toHaveBeenCalled();
+    expect(updateIssueComment).not.toHaveBeenCalled();
+    expect(runReviews).not.toHaveBeenCalled();
+  });
 });

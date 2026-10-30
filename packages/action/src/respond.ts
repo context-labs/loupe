@@ -258,11 +258,45 @@ interface CommentEvent {
 }
 
 /**
- * GitHub's trusted-author tiers for a repo comment. Only these may drive chat:
- * the command reaches agent execution, the full job secret set, and a branch
- * push, and the documented copy-paste workflow does not always gate on this.
+ * Cheap pre-filter before the authoritative permission check: these author
+ * tiers *may* have push access, so they are worth an API round-trip. Everyone
+ * else is denied without one. `author_association` is not itself an authz
+ * signal — MEMBER is any org member and COLLABORATOR includes read/triage-only
+ * users — so it never stands in for the real repository permission level.
  */
-const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const MAYBE_TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
+/** Repository permission levels that grant push access (GitHub's `permission`). */
+const PUSH_PERMISSIONS = new Set(["admin", "write"]);
+
+/**
+ * Authoritative authz for chat: the command reaches agent execution, the full
+ * job secret set, and a branch push, so the actor must hold real push access
+ * (`admin`/`write`) on the repo — not merely an org membership or a read-only
+ * collaborator slot. Fails closed: any API error denies.
+ */
+async function hasPushAccess(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  username: string,
+  logger: Logger,
+): Promise<boolean> {
+  try {
+    const { data } = await octokit.repos.getCollaboratorPermissionLevel({
+      owner,
+      repo,
+      username,
+    });
+    return PUSH_PERMISSIONS.has(data.permission);
+  } catch (err) {
+    logger.warn("Could not resolve repository permission; denying", {
+      login: username,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
 
 /** Extract the triggering comment and its actor from the GitHub event payload. */
 function readCommentEvent(eventPath: string): CommentEvent | undefined {
@@ -296,13 +330,23 @@ export async function handleComment(
   const comment = readCommentEvent(config.eventPath);
   if (!comment) return;
 
-  // Default-deny before any dispatch, ack, or harness spawn: an untrusted author
-  // must not reach agent execution, the job secrets, or a branch push. The
-  // documented chat workflow does not always carry the author gate, so enforce
-  // it in-product. Ignore silently — a comment reply here is an unauth-triggerable
-  // write.
-  if (!TRUSTED_ASSOCIATIONS.has(comment.authorAssociation)) {
-    logger.warn("Ignoring @loupe comment from untrusted author", {
+  // Default-deny before any dispatch, ack, or harness spawn: the author must
+  // hold real push access on the repo, since the command reaches agent
+  // execution, the job secrets, and a branch push. `author_association` is only
+  // a cheap pre-filter; the repository permission level is the authoritative
+  // gate. Ignore silently — a comment reply here is an unauth-triggerable write.
+  const octokit = makeOctokit(config.token, logger);
+  if (
+    !MAYBE_TRUSTED_ASSOCIATIONS.has(comment.authorAssociation) ||
+    !(await hasPushAccess(
+      octokit,
+      config.owner,
+      config.repo,
+      comment.login,
+      logger,
+    ))
+  ) {
+    logger.warn("Ignoring @loupe comment from unauthorized author", {
       login: comment.login,
       authorAssociation: comment.authorAssociation,
     });
@@ -321,7 +365,6 @@ export async function handleComment(
     repo: config.repo,
     pull_number: config.pullNumber,
   };
-  const octokit = makeOctokit(config.token, logger);
 
   if (/^help\b/i.test(instruction) || instruction.length === 0) {
     await postIssueComment(octokit, ref, HELP);
