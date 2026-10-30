@@ -193,15 +193,13 @@ describe("whip provider egress validation (F-90)", () => {
     ).toBe("https://api.inference.net/v1");
   });
 
-  it("allows any host with a warning when the allow-list is empty", () => {
-    logger.warn.mockClear();
+  it("refuses the block (fail closed) when the allow-list is empty", () => {
     const p = config(
       whip({ baseUrl: "https://whatever.test/v1", apiKeyEnv: "KEY" }),
     );
-    expect(
-      loadSettings(p, { allowedProviderHosts: [], logger }).whip,
-    ).toBeDefined();
-    expect(logger.warn).toHaveBeenCalledOnce();
+    expect(() => loadSettings(p, { allowedProviderHosts: [], logger })).toThrow(
+      /LOUPE_ALLOWED_PROVIDER_HOSTS/,
+    );
   });
 
   it("rejects an apiKeyEnv naming a job-infrastructure secret, even with an empty allow-list", () => {

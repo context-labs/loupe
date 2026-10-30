@@ -49,8 +49,8 @@ goes (`baseUrl`) and which env var's value is sent as the credential
 - `baseUrl` must be an `https:` URL.
 - Host allow-list — env `LOUPE_ALLOWED_PROVIDER_HOSTS` (comma-separated, Action
   only). **Set** → the `baseUrl` host must be a member or the run fails.
-  **Unset/empty** → any host is allowed but a warning is logged. Opt-in so
-  existing deployments keep working; set it on repos that accept fork PRs.
+  **Unset/empty** → a PR-supplied whip block is refused (fail closed); set
+  `LOUPE_ALLOWED_PROVIDER_HOSTS` to list its host before the Action will use it.
 - `apiKeyEnv` must be an env-var name and may not name a job-infrastructure
   secret (`GITHUB_*`, `GH_*`, `ACTIONS_*`, `RUNNER_*`, `AWS_*`, `AZURE_*`,
   `GOOGLE_*`, `GCP_*`, `INFISICAL_*`, `LOUPE_*`) — those are present in the job
