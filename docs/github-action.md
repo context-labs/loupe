@@ -33,6 +33,9 @@ jobs:
           config: .loupe.json
         env:
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
+          # Required if .loupe.json ships a whip provider block (fail closed on
+          # an unlisted host); set it to your provider's host.
+          LOUPE_ALLOWED_PROVIDER_HOSTS: api.inference.net
 ```
 
 See `examples/review.example.yml` for whip / claude / custom-prompt
@@ -58,7 +61,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: context-labs/loupe@v0
         with: { harness: whip, config: .loupe.json }
-        env: { INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }} }
+        env:
+          INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
+          # Required if .loupe.json ships a whip provider block (fail closed).
+          LOUPE_ALLOWED_PROVIDER_HOSTS: api.inference.net
 ```
 
 Commands: `@loupe review` (re-review the whole PR), `@loupe fix` (fix all open

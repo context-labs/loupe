@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Logger, LogProps } from "@loupe/logger";
 
 import {
+  materializeWhipHome,
   REDACTION_MARK,
   runCli,
   runWhipStreaming,
   type HarnessContext,
+  type WhipConfig,
 } from "../src/index";
 
 /**
@@ -103,6 +105,33 @@ describe("child env is scoped to a safelist + ctx.env (N4)", () => {
     const out = await runWhipStreaming(script.args, ctx(), script.bin);
     expect(out).toContain("PLANTED=no");
     expect(out).toContain("CRED=yes");
+  });
+});
+
+describe("materializeWhipHome forwards the declared provider key (N4 regression)", () => {
+  const whipCfg: WhipConfig = {
+    provider: {
+      name: "p",
+      baseUrl: "https://api.inference.net/v1",
+      apiKeyEnv: "TEST_PROVIDER_KEY",
+    },
+    models: ["m"],
+  };
+  afterEach(() => {
+    delete process.env.TEST_PROVIDER_KEY;
+  });
+
+  it("includes the config's apiKeyEnv value so whip (credentialKeys: []) still authenticates", () => {
+    process.env.TEST_PROVIDER_KEY = "sk-provider-value";
+    const env = materializeWhipHome(whipCfg);
+    expect(env.WHIP_HOME).toBeTruthy();
+    expect(env.TEST_PROVIDER_KEY).toBe("sk-provider-value");
+  });
+
+  it("omits the key when it is not present in the parent env", () => {
+    const env = materializeWhipHome(whipCfg);
+    expect(env.WHIP_HOME).toBeTruthy();
+    expect("TEST_PROVIDER_KEY" in env).toBe(false);
   });
 });
 

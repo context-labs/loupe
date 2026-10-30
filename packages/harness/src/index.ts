@@ -483,9 +483,16 @@ export function whipEventToTrace(raw: unknown): HarnessTraceEvent[] {
 }
 
 /**
- * Materialize a WhipConfig into a throwaway config dir and return the env
- * (WHIP_HOME) that points whip at it. Keeps loupe's `whip` block out of a
- * developer's real ~/.whip and removes the hand-written config step from CI.
+ * Materialize a WhipConfig into a throwaway config dir and return the env whip
+ * needs: WHIP_HOME (pointing at that dir) plus the one provider credential the
+ * config names via `apiKeyEnv`, forwarded from the parent process.env. whip
+ * declares no static `credentialKeys`, so without this forward the generic
+ * child-env safelist (which deliberately drops the rest of process.env) would
+ * starve whip of its provider key. The named var is already vetted on the
+ * untrusted path (BLOCKED_API_KEY_ENVS + host allow-list in enforceWhipGuard),
+ * so forwarding exactly that value — and nothing else — keeps N4's scoping.
+ * Keeps loupe's `whip` block out of a developer's real ~/.whip and removes the
+ * hand-written config step from CI.
  */
 export function materializeWhipHome(
   cfg: WhipConfig,
@@ -513,7 +520,10 @@ export function materializeWhipHome(
     ),
   };
   writeFileSync(join(dir, "config.json"), JSON.stringify(config, null, 2));
-  return { WHIP_HOME: dir };
+  const env: Record<string, string> = { WHIP_HOME: dir };
+  const apiKey = process.env[cfg.provider.apiKeyEnv];
+  if (apiKey !== undefined) env[cfg.provider.apiKeyEnv] = apiKey;
+  return env;
 }
 
 /**

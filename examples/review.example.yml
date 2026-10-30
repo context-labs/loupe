@@ -69,3 +69,6 @@ jobs:
         env:
           # only the secret value stays in the workflow; its NAME is in .loupe.json
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
+          # Required when .loupe.json ships a whip provider block: loupe fails
+          # closed on an unlisted provider host. Set it to your provider's host.
+          LOUPE_ALLOWED_PROVIDER_HOSTS: api.inference.net
