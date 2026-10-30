@@ -68,3 +68,4 @@ jobs:
           config: .loupe/config.json
         env:
           INFERENCE_API_KEY: ${{ env.INFERENCE_NET_API_KEY }}
+          LOUPE_ALLOWED_PROVIDER_HOSTS: api.inference.net

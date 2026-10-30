@@ -24,7 +24,7 @@ Each harness declares `credentialKeys` — the env vars it wants forwarded:
 
 | Harness | Keys | Notes |
 |---|---|---|
-| `whip` | (none) | Self-authenticates. Reads `INFERENCE_API_KEY` if present, else its own local login (`~/.whip`). inference.net is its built-in default provider. |
+| `whip` | (none) | With a `.loupe.json` `whip` block, loupe forwards the one env var its `provider.apiKeyEnv` names (e.g. `INFERENCE_API_KEY`) into the whip subprocess. Without a block, whip uses its own local login (`~/.whip`); inference.net is its built-in default provider. |
 | `claude` | `ANTHROPIC_API_KEY` | Falls back to the local `claude` login if the key is absent. |
 | `codex` | `OPENAI_API_KEY` | — |
 
@@ -35,9 +35,12 @@ and a genuinely missing key surfaces as the harness's own auth error (visible at
 
 ## In CI
 
-The harness runs on the runner, so its key must reach the job env. With whip +
-inference.net, expose `INFERENCE_API_KEY` to the job (e.g. via Infisical) and the
-`env` provider forwards it. See [github-action.md](github-action.md).
+The harness runs on the runner, so its key must reach the job env. With a whip
+provider block, expose the var its `apiKeyEnv` names (e.g. `INFERENCE_API_KEY`,
+via Infisical or a plain secret) to the job; loupe forwards exactly that one var
+into the whip subprocess (other harnesses get the keys in their `credentialKeys`).
+A whip provider block also needs `LOUPE_ALLOWED_PROVIDER_HOSTS` set to its host
+(fail closed; see below). See [github-action.md](github-action.md).
 
 ## Repo-supplied provider block (`.loupe.json` `whip`)
 
@@ -49,8 +52,8 @@ goes (`baseUrl`) and which env var's value is sent as the credential
 - `baseUrl` must be an `https:` URL.
 - Host allow-list — env `LOUPE_ALLOWED_PROVIDER_HOSTS` (comma-separated, Action
   only). **Set** → the `baseUrl` host must be a member or the run fails.
-  **Unset/empty** → any host is allowed but a warning is logged. Opt-in so
-  existing deployments keep working; set it on repos that accept fork PRs.
+  **Unset/empty** → a PR-supplied whip block is refused (fail closed); set
+  `LOUPE_ALLOWED_PROVIDER_HOSTS` to list its host before the Action will use it.
 - `apiKeyEnv` must be an env-var name and may not name a job-infrastructure
   secret (`GITHUB_*`, `GH_*`, `ACTIONS_*`, `RUNNER_*`, `AWS_*`, `AZURE_*`,
   `GOOGLE_*`, `GCP_*`, `INFISICAL_*`, `LOUPE_*`) — those are present in the job
