@@ -88,7 +88,7 @@ const whipConfigSchema = z.object({
 
 /** Operator-controlled constraints for the PR-supplied whip provider block. */
 export type WhipGuard = {
-  /** Permitted provider hosts; empty = allow any (with a warning). */
+  /** Permitted provider hosts; empty/unset refuses any PR-supplied whip block. */
   readonly allowedProviderHosts: readonly string[];
   readonly logger: Logger;
 };
@@ -117,10 +117,11 @@ const BLOCKED_API_KEY_ENVS: readonly RegExp[] = [
 /**
  * Enforce the operator constraints on the PR-supplied whip provider block.
  * `apiKeyEnv` may never name a job-infrastructure secret. For the host:
- * a NON-EMPTY allow-list is a hard requirement (host must be a member); an
- * UNSET/empty list preserves current behavior but warns, so there is a safe
- * opt-in without breaking existing deployments. baseUrl is already a validated
- * https URL by the schema.
+ * the allow-list is a hard requirement — the host must be a member, and an
+ * UNSET/empty list fails closed (the block is refused), so an operator must
+ * opt in by naming the host in `LOUPE_ALLOWED_PROVIDER_HOSTS` before a
+ * PR-supplied provider key can egress. baseUrl is already a validated https
+ * URL by the schema.
  */
 function enforceWhipGuard(
   whip: z.infer<typeof whipConfigSchema>,
@@ -134,11 +135,9 @@ function enforceWhipGuard(
   }
   const host = new URL(whip.provider.baseUrl).host.toLowerCase();
   if (guard.allowedProviderHosts.length === 0) {
-    guard.logger.warn(
-      "Using an unvalidated model provider host from repo config; set LOUPE_ALLOWED_PROVIDER_HOSTS to restrict it",
-      { host },
+    throw new Error(
+      `a PR-supplied whip provider block requires LOUPE_ALLOWED_PROVIDER_HOSTS to be set; refusing to route a provider credential to unvalidated host "${host}"`,
     );
-    return;
   }
   if (!guard.allowedProviderHosts.includes(host)) {
     throw new Error(

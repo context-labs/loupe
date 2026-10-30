@@ -101,6 +101,42 @@ export type Harness = {
   review(ctx: HarnessContext): Promise<string>;
 };
 
+/**
+ * Minimal non-secret process-level vars a harness child needs to run. In the
+ * Action every secret is injected into process.env, so spreading `...process.env`
+ * into the child would hand every spawned harness the full secret set regardless
+ * of its declared `credentialKeys`. Build the child env explicitly from this
+ * safelist instead, merged with only the resolved credentials in `ctx.env`.
+ */
+const CHILD_ENV_SAFELIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "SHELL",
+  "USER",
+] as const;
+
+/**
+ * The explicit child env for a spawned harness: the safelist above plus any
+ * `WHIP_*` the parent exports, merged with `ctx.env` (the resolved
+ * credentialKeys, which also carries the materialized WHIP_HOME when set).
+ */
+function childEnv(ctxEnv: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of CHILD_ENV_SAFELIST) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith("WHIP_") && value !== undefined) env[key] = value;
+  }
+  return { ...env, ...ctxEnv };
+}
+
 function commandExists(cmd: string): Promise<boolean> {
   return new Promise((resolve) => {
     const p = spawn("which", [cmd], { stdio: "ignore" });
@@ -138,7 +174,7 @@ export function runCli(
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd: ctx.workdir,
-      env: { ...process.env, ...ctx.env },
+      env: childEnv(ctx.env),
     });
     let stdout = "";
     let stderr = "";
@@ -270,7 +306,7 @@ export function runWhipStreaming(
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, {
       cwd: ctx.workdir,
-      env: { ...process.env, ...ctx.env },
+      env: childEnv(ctx.env),
     });
     let buffer = ""; // partial NDJSON line
     let text = ""; // accumulated assistant reply
@@ -313,14 +349,25 @@ export function runWhipStreaming(
           }
           break;
         case "tool_start":
-          log.info("tool call", { name: event["name"], args: event["args"] });
+          log.info("tool call", {
+            name: event["name"],
+            // args may arrive as a string or an object; scrub a string form so
+            // a secret echoed in a tool's arguments never lands in the log.
+            args: scrub(
+              typeof event["args"] === "string"
+                ? event["args"]
+                : event["args"] === undefined
+                  ? undefined
+                  : JSON.stringify(event["args"]),
+            ),
+          });
           break;
         case "tool_end":
           log.info("tool result", {
             name: event["name"],
             result:
               typeof event["result"] === "string"
-                ? event["result"].slice(0, 300)
+                ? scrub(event["result"])?.slice(0, 300)
                 : undefined,
           });
           break;
