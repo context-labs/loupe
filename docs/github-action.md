@@ -126,6 +126,9 @@ gh api -X PUT repos/context-labs/loupe/actions/permissions/access \
 
 ## Recommended posture
 
+- **Event:** use `pull_request` (fork PRs get a read-only token and no secrets),
+  never `pull_request_target` — it exposes base-repo secrets to attacker PR-head
+  content, so loupe refuses to run under it.
 - **Advisory:** `continue-on-error: true`, not a required check — findings are PR
   comments, never a merge gate.
 - **Cadence:** `ready_for_review` + skip drafts + `concurrency: cancel-in-progress`

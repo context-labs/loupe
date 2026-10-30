@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Logger, LogProps } from "@loupe/logger";
 
 import {
+  forwardedSecretValues,
   materializeWhipHome,
   REDACTION_MARK,
   runCli,
@@ -132,6 +133,34 @@ describe("materializeWhipHome forwards the declared provider key (N4 regression)
     const env = materializeWhipHome(whipCfg);
     expect(env.WHIP_HOME).toBeTruthy();
     expect("TEST_PROVIDER_KEY" in env).toBe(false);
+  });
+});
+
+describe("forwarded credential values are scrubbed regardless of var name (N8)", () => {
+  it("collects off-pattern ctx.env values, skips WHIP_* paths and short values", () => {
+    const vals = forwardedSecretValues({
+      GROQ_KEY: "sk-offpattern-value-abcdef", // name has no API_KEY/TOKEN/… token
+      WHIP_HOME: "/tmp/whip/home/dir/path/here",
+      SHORT: "x",
+    });
+    expect(vals).toContain("sk-offpattern-value-abcdef");
+    expect(vals).not.toContain("/tmp/whip/home/dir/path/here");
+    expect(vals).not.toContain("x");
+  });
+
+  it("redacts an off-pattern forwarded key echoed in a whip tool result", async () => {
+    const offKey = "sk-groq-offpattern-abcdef123456";
+    const { logger, infos } = capturingLogger();
+    const script = node(
+      `process.stdout.write(JSON.stringify({type:"tool_end",name:"read",result:"leaked ${offKey}"})+"\\n");` +
+        `process.exit(0);`,
+    );
+    await runWhipStreaming(
+      script.args,
+      ctx({ logger, env: { GROQ_KEY: offKey } }),
+      script.bin,
+    );
+    expect(JSON.stringify(infos)).not.toContain(offKey);
   });
 });
 

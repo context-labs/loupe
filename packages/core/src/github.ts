@@ -16,6 +16,22 @@ export type PullRef = {
   readonly pull_number: number;
 };
 
+// Cap every paginated fetch. A fork PR can inflate files/comments/reviews
+// without limit, turning each run into a self-DoS (GitHub API + inference-token
+// cost scale with attacker input). 20 pages × 100 per page = 2000 items is well
+// past any real PR; beyond it we stop walking.
+// ponytail: hard cap, not adaptive — a 2000+ item PR is not a case worth tuning.
+const MAX_PAGES = 20;
+
+/** octokit.paginate map callback that stops after MAX_PAGES. One counter per call. */
+function capPages<T>(): (response: { data: T[] }, done: () => void) => T[] {
+  let pages = 0;
+  return (response, done) => {
+    if (++pages >= MAX_PAGES) done();
+    return response.data;
+  };
+}
+
 export type PullContext = {
   readonly title: string;
   readonly description: string;
@@ -49,10 +65,11 @@ export async function fetchPullContext(
   ref: PullRef,
 ): Promise<PullContext> {
   const { data: pr } = await octokit.pulls.get(ref);
-  const files = await octokit.paginate(octokit.pulls.listFiles, {
-    ...ref,
-    per_page: 100,
-  });
+  const files = await octokit.paginate(
+    octokit.pulls.listFiles,
+    { ...ref, per_page: 100 },
+    capPages(),
+  );
   return {
     title: pr.title,
     description: pr.body ?? "",
@@ -174,10 +191,11 @@ export async function getLastReviewed(
       if (sha) return { unknown: false, sha };
     }
 
-    const reviews = await octokit.paginate(octokit.pulls.listReviews, {
-      ...ref,
-      per_page: 100,
-    });
+    const reviews = await octokit.paginate(
+      octokit.pulls.listReviews,
+      { ...ref, per_page: 100 },
+      capPages(),
+    );
     for (const review of reviews.reverse()) {
       if (review.user?.login !== self) continue;
       const sha = shaFromMarker(review.body, markerPrefix(reviewerName));
@@ -339,12 +357,16 @@ function shaFromMarker(
 }
 
 async function listIssueComments(octokit: Octokit, ref: PullRef) {
-  return octokit.paginate(octokit.issues.listComments, {
-    owner: ref.owner,
-    repo: ref.repo,
-    issue_number: ref.pull_number,
-    per_page: 100,
-  });
+  return octokit.paginate(
+    octokit.issues.listComments,
+    {
+      owner: ref.owner,
+      repo: ref.repo,
+      issue_number: ref.pull_number,
+      per_page: 100,
+    },
+    capPages(),
+  );
 }
 
 /** What to do with this reviewer's inline comments from a previous run. */
@@ -424,6 +446,7 @@ export async function listOpenLoupeFindings(
   const self = await getSelfLogin(octokit);
   const findings: OpenLoupeFinding[] = [];
   let after: string | null = null;
+  let pages = 0;
   do {
     const page: ReviewThreadsPage = await octokit.graphql(
       REVIEW_THREADS_QUERY,
@@ -462,7 +485,7 @@ export async function listOpenLoupeFindings(
       });
     }
     after = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
-  } while (after);
+  } while (after && ++pages < MAX_PAGES);
   return findings.sort(
     (a, b) =>
       a.path.localeCompare(b.path) ||
@@ -506,6 +529,7 @@ async function snapshotPriorComments(
           pull_number: ref.pull_number,
           per_page: 100,
         },
+        capPages(),
       );
       return {
         commentIds: comments
@@ -521,6 +545,7 @@ async function snapshotPriorComments(
     }
     const threadIds: string[] = [];
     let after: string | null = null;
+    let pages = 0;
     do {
       const page: ReviewThreadsPage = await octokit.graphql(
         REVIEW_THREADS_QUERY,
@@ -547,7 +572,7 @@ async function snapshotPriorComments(
         threadIds.push(t.id);
       }
       after = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
-    } while (after);
+    } while (after && ++pages < MAX_PAGES);
     return { commentIds: [], threadIds };
   } catch (err) {
     logger.warn(

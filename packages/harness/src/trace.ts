@@ -107,3 +107,25 @@ export function envSecretValues(
   }
   return out;
 }
+
+/**
+ * Scrub every value loupe itself resolved and forwarded to the harness via
+ * `ctx.env`, keyed on the value not the var name. The name-pattern sweep above
+ * only catches vars whose name contains API_KEY/TOKEN/SECRET/…; an off-pattern
+ * provider key (e.g. `GROQ_KEY`, `OPENROUTER`, `DEEPSEEK`, chosen via an
+ * attacker-supplied `apiKeyEnv`) would slip past it and leak if echoed back. The
+ * credentials we forwarded are secrets regardless of their name; `WHIP_*` are
+ * temp-dir paths, not secrets.
+ */
+export function forwardedSecretValues(
+  env: Record<string, string | undefined>,
+): string[] {
+  const out: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (key.startsWith("WHIP_")) continue;
+    if (typeof value === "string" && value.length >= MIN_SECRET_LENGTH) {
+      out.push(value);
+    }
+  }
+  return out;
+}

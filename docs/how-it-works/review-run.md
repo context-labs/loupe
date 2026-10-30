@@ -20,7 +20,7 @@ flowchart LR
 
 ## Step by step
 
-1. **Fetch.** GitHub reads in parallel: `pulls.get`, `pulls.listFiles` (paginated, with patches), and `repos.getContent` for each convention doc at the PR head. Convention paths default to `CLAUDE.md, AGENTS.md, .loupe.md, CONTRIBUTING.md`, prefixed with `dir` when set.
+1. **Fetch.** GitHub reads in parallel: `pulls.get`, `pulls.listFiles` (paginated, with patches), and `repos.getContent` for each convention doc at the PR head. Every paginated fetch (changed files, issue/review comments, reviews, review-thread walks) is capped at 20 pages (`MAX_PAGES`, ~2000 items) so a fork PR can't inflate a collection into a per-run self-DoS; past the cap the collection is silently truncated, so a PR over ~2000 changed files gets a review of the first 2000. Convention paths default to `CLAUDE.md, AGENTS.md, .loupe.md, CONTRIBUTING.md`, prefixed with `dir` when set.
 2. **Scope.** Keep files under any listed `dir` that match the reviewer's `include` and miss its `exclude`. Zero files means the reviewer is skipped with no GitHub writes.
 3. **Incremental or full.** See [First run vs later runs](./first-vs-incremental.md). Default is incremental. `@loupe review` and the `full` input force full.
 4. **Prompts.** Every in-scope PR file's patch is rendered as a `### <path>` section and written to a temp file. loupe greps the checkout for callers of the exports the diff touches, three hops deep within the package. The user prompt carries the file tree, that path, the cwd-to-repo path mapping when `dir` is set, the call-site list, and on an incremental run the list of files to reassess. See [What the agent sees](./context.md).

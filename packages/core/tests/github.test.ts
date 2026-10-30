@@ -4,6 +4,7 @@ import {
   checkPrOpen,
   checkPublishable,
   cleanupStrandedThreads,
+  fetchPullContext,
   getLastReviewed,
   listOpenLoupeFindings,
   postReview,
@@ -1338,5 +1339,42 @@ describe("combined summary", () => {
       }),
     );
     expect(api.issues.createComment).not.toHaveBeenCalled();
+  });
+});
+
+describe("pagination is capped (N11)", () => {
+  it("stops walking listFiles after MAX_PAGES via the done() callback", async () => {
+    // A fork PR can inflate the file list without limit. Emulate octokit's
+    // page-walk: call the map callback with one item per page until it invokes
+    // done(). An uncapped fetch would run the full (here, 1000-page) budget.
+    let callbackRuns = 0;
+    const paginate = async (
+      _route: unknown,
+      _params: unknown,
+      map: (res: { data: unknown[] }, done: () => void) => unknown[],
+    ): Promise<unknown[]> => {
+      const out: unknown[] = [];
+      let stop = false;
+      const done = (): void => {
+        stop = true;
+      };
+      for (let i = 0; i < 1000 && !stop; i++) {
+        callbackRuns++;
+        out.push(...map({ data: [{ filename: `f${i}.ts`, patch: "" }] }, done));
+      }
+      return out;
+    };
+    const api = {
+      pulls: {
+        get: vi.fn(async () => ({
+          data: { title: "t", body: "", head: { sha: "a".repeat(40) } },
+        })),
+        listFiles: vi.fn(),
+      },
+      paginate,
+    };
+    const ctx = await fetchPullContext(api as never, ref);
+    expect(callbackRuns).toBe(20); // MAX_PAGES
+    expect(ctx.files).toHaveLength(20);
   });
 });

@@ -7,7 +7,7 @@ import type { Logger } from "@loupe/logger";
 
 import { HarnessError, classifyHarnessError } from "./errors";
 import type { HarnessTraceEvent } from "./trace";
-import { envSecretValues, redactSecrets } from "./trace";
+import { envSecretValues, forwardedSecretValues, redactSecrets } from "./trace";
 import { resolveWhipBinary } from "./whip-binary";
 
 export {
@@ -170,7 +170,10 @@ export function runCli(
   ctx: HarnessContext,
 ): Promise<string> {
   const log = ctx.logger.child(cmd);
-  const secrets = envSecretValues({ ...process.env, ...ctx.env });
+  const secrets = [
+    ...envSecretValues(process.env),
+    ...forwardedSecretValues(ctx.env),
+  ];
   const emit = (event: HarnessTraceEvent): void =>
     ctx.trace?.({
       ...event,
@@ -293,7 +296,10 @@ export function runWhipStreaming(
   // Known secrets (resolved credential values handed to the subprocess via env)
   // are scrubbed from every trace payload downstream so an API key that happens
   // to surface in a tool result or reasoning chunk never lands in the summary.
-  const secrets = envSecretValues({ ...process.env, ...ctx.env });
+  const secrets = [
+    ...envSecretValues(process.env),
+    ...forwardedSecretValues(ctx.env),
+  ];
   const scrub = (s: string | undefined): string | undefined =>
     s === undefined ? undefined : redactSecrets(s, secrets);
   // Scrub every string field on an event (delta/args/result/text/error).

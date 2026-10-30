@@ -47,8 +47,11 @@ Making every step `continue-on-error: true` keeps a loupe failure from blocking 
 
 ## Inside the action
 
-The action reads `GITHUB_EVENT_NAME` and branches once:
+The action reads `GITHUB_EVENT_NAME` and branches:
 
+- `pull_request_target` → hard refusal (the run throws). That event pairs
+  base-repo secrets with attacker-controlled PR-head content, which loupe's
+  defenses assume never happens; wire loupe on `pull_request` instead.
 - `issue_comment` or `pull_request_review_comment` → [chat handler](./chat.md).
 - anything else → [review run](./review-run.md) for every reviewer in the config.
 
