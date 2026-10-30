@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 
 import {
   HarnessError,
@@ -1213,7 +1213,7 @@ export function resolveWithin(root: string, relPath: string): string {
  * path to a SKILL.md or a skill directory (SKILL.md is appended). Best-effort:
  * a missing skill is warned and skipped, never fatal.
  */
-function loadSkills(
+export function loadSkills(
   workdir: string,
   paths: readonly string[] | undefined,
   logger: Logger,
@@ -1221,11 +1221,14 @@ function loadSkills(
   const out: string[] = [];
   for (const p of paths ?? []) {
     try {
-      const abs = resolveWithin(workdir, p);
-      const file =
-        existsSync(abs) && statSync(abs).isDirectory()
-          ? join(abs, "SKILL.md")
-          : abs;
+      // Decide dir-vs-file first, then run the containment/realpath guard on the
+      // final path actually read so a symlinked SKILL.md cannot escape the tree.
+      const resolved = resolve(workdir, p);
+      const isDir = existsSync(resolved) && statSync(resolved).isDirectory();
+      const file = resolveWithin(workdir, isDir ? join(p, "SKILL.md") : p);
+      if (basename(file) !== "SKILL.md") {
+        throw new Error(`Skill "${p}" must be a directory or a SKILL.md file`);
+      }
       out.push(readFileSync(file, "utf8"));
     } catch {
       logger.warn("Could not load skill; skipping", { skill: p });
