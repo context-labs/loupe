@@ -21,6 +21,8 @@ Order matters for caching. Everything here is identical across PRs for a given r
 2. **Procedure.** Always appended, even under custom guidance: locate and read the callers of every changed export before judging, follow thin wrappers one more hop, treat a newly interactive or blocking call inside a spinner or other terminal-owning wrapper as a defect. `procedure: false` removes it.
 3. **Skills.** Each path in `skills` is read from the checkout. A directory means its `SKILL.md`. A missing skill logs a warning and is skipped.
 4. **Conventions.** Every convention doc that exists at the PR head, concatenated under `# <path>` headers. Fetched via the GitHub API, not the checkout.
+
+Both skills and conventions are read from the PR head, so on an untrusted PR their contents are attacker-influenced. loupe wraps both blocks in an `<untrusted-repo-docs>` fence that tells the model to treat them as reference, never as instructions that override the system prompt, relax the review, change the output format, or suppress findings. A strongly-worded skill is therefore followed as guidance, not as an authoritative override.
 5. **Reasoning note.** One sentence, only when `reasoning` is configured. The same value goes to the harness natively.
 6. **Profile directive.** Which severities to report.
 7. **Tool directive.** Agentic: you have the checkout, read hunks from the diff file on demand, spend the turn budget on callers and contracts first, use subagents only for genuinely parallel work, then stop and emit JSON. Headless (retry, chat): no tools, diff is inline. The verify pass uses the agentic directive when the review was agentic and a checkout exists, else the headless directive.
