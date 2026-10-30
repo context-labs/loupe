@@ -12,6 +12,21 @@ import {
 } from "./types";
 
 /**
+ * Neutralize any loupe control marker the model echoed into its own output.
+ * loupe re-parses `<!-- loupe:... -->` markers out of posted comment bodies to
+ * decide what has already been reviewed (summary SHA) and which combined-summary
+ * sections to preserve. Attacker-influenced diff/content can induce the model to
+ * emit a forged marker in its review text; placed in a posted body it can win a
+ * positional parse (suppressing incremental review, N7) or mis-close a section
+ * boundary (wiping a sibling reviewer's findings, N10). Breaking the `loupe:`
+ * token with a zero-width space keeps the text a hidden HTML comment but stops it
+ * matching the parsers, so loupe's own trailing markers stay authoritative.
+ */
+function neutralizeMarkers(s: string): string {
+  return s.replace(/<!--(\s*)loupe:/gi, "<!--$1loupe​:");
+}
+
+/**
  * Parse JSON, repairing LLM-malformed output (truncation, unescaped chars in
  * freeform strings, trailing commas) rather than throwing. Models routinely emit
  * *almost* valid JSON; a strict parse would drop the whole review.
@@ -121,24 +136,37 @@ export function parseReviewOutput(stdout: string): ParsedReview {
   for (const item of findings) {
     const kept = findingSchema.safeParse(item);
     if (kept.success) {
-      keptFindings.push(kept.data);
+      keptFindings.push({
+        ...kept.data,
+        body: neutralizeMarkers(kept.data.body),
+      });
       continue;
     }
     // A rejected finding is usually just a bad line number. Keep it as a note
     // when the path and body still read — the model's work is otherwise lost
     // with nothing but a count to show for it.
     const salvaged = salvagedFindingSchema.safeParse(item);
-    if (salvaged.success) salvagedFindings.push(salvaged.data);
+    if (salvaged.success)
+      salvagedFindings.push({
+        ...salvaged.data,
+        body: neutralizeMarkers(salvaged.data.body),
+      });
     else malformedFindings++;
   }
-  const keptConcerns = pick(concerns, concernSchema);
+  const keptConcerns = pick(concerns, concernSchema).map((c) => ({
+    ...c,
+    title: neutralizeMarkers(c.title),
+    detail: neutralizeMarkers(c.detail),
+  }));
   return {
     review: {
-      summary,
+      summary: neutralizeMarkers(summary),
       findings: keptFindings,
       concerns: keptConcerns,
-      highlights: highlights.map((h) => h.trim()).filter(Boolean),
-      diagram: diagram?.trim() ? diagram.trim() : undefined,
+      highlights: highlights
+        .map((h) => neutralizeMarkers(h.trim()))
+        .filter(Boolean),
+      diagram: diagram?.trim() ? neutralizeMarkers(diagram.trim()) : undefined,
     },
     salvagedFindings,
     malformedFindings,

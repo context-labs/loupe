@@ -167,6 +167,15 @@ async function runFix(
     return;
   }
   const headRef = pr.head.ref;
+  // headRef comes from PR metadata and is passed to git below. A ref name
+  // beginning with "-" (or carrying shell/path metacharacters) would be read as
+  // a flag or otherwise mangle the fetch/checkout/push. Git's own refname rules
+  // forbid this, so a rejection here only ever fires on a malformed/hostile ref.
+  if (!/^[A-Za-z0-9._/-]+$/.test(headRef) || headRef.startsWith("-")) {
+    throw new Error(
+      `Refusing to operate on an unexpected branch ref: ${headRef}`,
+    );
+  }
   const originalHead = pr.head.sha;
   const cwd = config.workdir;
 
@@ -228,13 +237,30 @@ async function runFix(
     return;
   }
   const token = config.token;
-  const pushUrl = `https://x-access-token:${token}@github.com/${ref.owner}/${ref.repo}.git`;
-  const push = spawnSync("git", ["push", pushUrl, `HEAD:${headRef}`], {
-    cwd,
-    encoding: "utf8",
-  });
+  // Pass the token as an auth header, not in the remote URL: a URL-embedded
+  // token is visible in the process table (argv) and can echo into git's own
+  // error text. The header value never appears in a printed URL, and we still
+  // redact both the token and the encoded header from any logged stderr.
+  const authHeader = `Authorization: Basic ${Buffer.from(
+    `x-access-token:${token}`,
+  ).toString("base64")}`;
+  const push = spawnSync(
+    "git",
+    [
+      "-c",
+      `http.extraheader=${authHeader}`,
+      "push",
+      `https://github.com/${ref.owner}/${ref.repo}.git`,
+      `HEAD:${headRef}`,
+    ],
+    { cwd, encoding: "utf8" },
+  );
   if (push.status !== 0) {
-    logger.warn("Fix push failed", { stderr: push.stderr.slice(0, 500) });
+    const stderr = push.stderr
+      .slice(0, 500)
+      .replaceAll(token, "[REDACTED]")
+      .replaceAll(authHeader, "[REDACTED]");
+    logger.warn("Fix push failed", { stderr });
     await postIssueComment(
       octokit,
       ref,
