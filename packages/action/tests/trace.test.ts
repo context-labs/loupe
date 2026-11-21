@@ -19,31 +19,35 @@ function sample(): HarnessTraceEvent[] {
     {
       type: "reasoning",
       delta: "user wants a safe file read; check for path traversal. ",
-      model: "kimi-k3",
-      phase: "primary:kimi-k3",
+      model: "moonshotai/kimi-k3.1-pro",
+      phase: "primary:moonshotai/kimi-k3.1-pro",
     },
-    { type: "text", delta: '{"summary":', phase: "primary:kimi-k3" },
+    {
+      type: "text",
+      delta: '{"summary":',
+      phase: "primary:moonshotai/kimi-k3.1-pro",
+    },
     {
       type: "tool_start",
       name: "read",
       args: '{"path":"src/a.ts"}',
-      phase: "primary:kimi-k3",
+      phase: "primary:moonshotai/kimi-k3.1-pro",
     },
     {
       type: "tool_end",
       name: "read",
       result: "export const a = 1;",
-      phase: "primary:kimi-k3",
+      phase: "primary:moonshotai/kimi-k3.1-pro",
     },
     {
       type: "text",
       delta: '"done","findings":[]}',
-      phase: "primary:kimi-k3",
+      phase: "primary:moonshotai/kimi-k3.1-pro",
     },
     {
       type: "done",
       text: '{"summary":"safe","findings":[],"concerns":[]}',
-      phase: "primary:kimi-k3",
+      phase: "primary:moonshotai/kimi-k3.1-pro",
     },
   ];
 }
@@ -52,7 +56,7 @@ describe("renderTraceSection", () => {
   it("renders a compact trace with collapsible details", () => {
     const md = renderTraceSection("engine", sample(), { harness: "whip" });
     expect(md).toContain("### ✅ engine");
-    expect(md).toContain("`whip` · `kimi-k3` · 1 inspection");
+    expect(md).toContain("`whip` · `moonshotai/kimi-k3.1-pro` · 1 inspection");
     expect(md).toContain("#### ✅ Review");
     expect(md).toContain("<strong>🧠 Thinking</strong>");
     expect(md).toContain("**Inspected**");
@@ -68,19 +72,21 @@ describe("renderTraceSection", () => {
       {
         type: "reasoning",
         delta: "check evidence",
-        model: "kimi-k3",
-        phase: "verify:kimi-k3",
+        model: "moonshotai/kimi-k3.1-pro",
+        phase: "verify:moonshotai/kimi-k3.1-pro",
       },
       {
         type: "done",
         text: '{"verdicts":[]}',
-        model: "kimi-k3",
-        phase: "verify:kimi-k3",
+        model: "moonshotai/kimi-k3.1-pro",
+        phase: "verify:moonshotai/kimi-k3.1-pro",
       },
     ]);
     expect(md).toContain("#### ✅ Review");
     expect(md).toContain("#### ✅ Verify findings");
-    expect(md).toContain("`unknown` · `kimi-k3` · 1 inspection");
+    expect(md).toContain(
+      "`unknown` · `moonshotai/kimi-k3.1-pro` · 1 inspection",
+    );
   });
 
   it("uses a longer fence when output contains backticks", () => {

@@ -112,7 +112,7 @@ export type ReviewRequest = {
   readonly dirs?: readonly string[];
   /** Compute and log the review without posting it to the PR. */
   readonly dryRun?: boolean;
-  /** Model id passed to the harness (e.g. "kimi-k3"). */
+  /** Model id passed to the harness (e.g. "moonshotai/kimi-k3.1-pro"). */
   readonly model?: string;
   /**
    * Reasoning effort, passed to the harness natively and noted in the prompt.

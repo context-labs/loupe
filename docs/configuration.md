@@ -40,7 +40,7 @@ whose globs match a changed file and posts each as its own labeled review
 | `profile` | no | Noise profile: `quiet` (blockers) \| `chill` (default) \| `assertive` (all). |
 | `verify` | no | `false` to skip the verification pass (default on). |
 | `pathInstructions` | no | `[{ glob, instruction }]` extra review instructions for matching files. |
-| `ensemble` | no | `["kimi-k3","glm-5.2-fast"]` — run several models, keep findings a majority agree on. |
+| `ensemble` | no | `["moonshotai/kimi-k3.1-pro","glm-5.2-fast"]` — run several models, keep findings a majority agree on. |
 | `skills` | no | Paths to skill docs (a `SKILL.md` or a skill dir) folded into the reviewer, e.g. `[".agents/skills/i-have-adhd"]` to enforce a terse output style. |
 | `procedure` | no | `false` drops the always-on review procedure (caller check, wrapper rule) from this reviewer's prompt. Also a top-level default. |
 | `promptCache` | no | `false` (default `true`) suppresses the stable prompt-cache key loupe sends so the provider reuses the cached system prefix. Set `false` for a reviewer whose model rejects `prompt_cache_key` as an unrecognized argument (e.g. some OpenAI-compatible endpoints strict-validate unknown fields); those models cache the prefix automatically by match, so the key adds nothing and its presence can 400. Also a top-level default and the `prompt-cache` Action input / `--no-prompt-cache` flag. The whip harness also self-heals a cache-key 400 by retrying without the key, so this flag only skips that wasted round-trip. |

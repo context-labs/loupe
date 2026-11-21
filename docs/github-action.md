@@ -29,7 +29,7 @@ jobs:
       - uses: context-labs/loupe@v0
         with:
           harness: whip
-          model: kimi-k3
+          model: moonshotai/kimi-k3.1-pro
           config: .loupe.json
         env:
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}

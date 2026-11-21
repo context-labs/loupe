@@ -25,7 +25,7 @@ Requires [Bun](https://bun.sh) 1.3.14 and a harness CLI on `PATH` (default:
 ## Run a review locally
 
 ```bash
-# defaults: whip harness, kimi-k3, harness-default reasoning effort, agentic
+# defaults: whip harness, moonshotai/kimi-k3.1-pro, harness-default reasoning effort, agentic
 bun run packages/action/src/cli.ts review owner/repo#123
 
 # PR URL also works
@@ -48,7 +48,7 @@ Resolved in order: `--token` → `GITHUB_TOKEN` → `gh auth token`. Needs
 | Flag | Default | Purpose |
 |---|---|---|
 | `-H, --harness <name>` | `whip` | Agent CLI: `whip`, `claude`, `codex`. |
-| `-m, --model <name>` | `kimi-k3` | Model id passed to the harness. |
+| `-m, --model <name>` | `moonshotai/kimi-k3.1-pro` | Model id passed to the harness. |
 | `-r, --reasoning <level>` | harness default | `low` \| `medium` \| `high`, passed to the harness natively. |
 | `--prior-comments <policy>` | `resolve` | Prior inline comments on re-review: `resolve` \| `delete` \| `keep`. |
 | `--max-turns <n>` | `10` | Cap on the agentic tool loop. |

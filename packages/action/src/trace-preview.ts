@@ -86,7 +86,7 @@ function nonWhipTrace(reviewer: string): ReviewerTrace {
 
 function fixture(): ReviewerTrace[] {
   return [
-    reviewerTrace("code", "whip", "kimi-k3"),
+    reviewerTrace("code", "whip", "moonshotai/kimi-k3.1-pro"),
     {
       ...reviewerTrace("chemist", "whip", "o3-mini"),
       harness: "whip",
