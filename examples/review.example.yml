@@ -19,7 +19,7 @@ jobs:
       - uses: context-labs/loupe@v0
         with:
           harness: whip
-          model: kimi-k3
+          model: moonshotai/kimi-k3.1-pro
           reasoning: medium
           dir: inference # scope a monorepo to one folder (optional)
 

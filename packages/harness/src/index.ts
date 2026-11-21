@@ -53,7 +53,7 @@ export type ReasoningEffort = "low" | "medium" | "high";
 export type HarnessContext = {
   readonly systemPrompt: string;
   readonly userPrompt: string;
-  /** Model id, harness-specific (e.g. "kimi-k3", "claude-opus-4-8"). */
+  /** Model id, harness-specific (e.g. "moonshotai/kimi-k3.1-pro", "claude-opus-4-8"). */
   readonly model?: string;
   /** Allow the agent to use tools and explore the checkout (vs diff-only). */
   readonly agentic?: boolean;

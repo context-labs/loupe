@@ -82,7 +82,10 @@ program
   .description("Review a pull request and post inline comments")
   .argument("<pr>", "PR URL (github.com/owner/repo/pull/N) or owner/repo#N")
   .option("-H, --harness <name>", "agent CLI to review with (default whip)")
-  .option("-m, --model <name>", "model id for the harness (default kimi-k3)")
+  .option(
+    "-m, --model <name>",
+    "model id for the harness (default moonshotai/kimi-k3.1-pro)",
+  )
   .option(
     "-r, --reasoning <level>",
     "reasoning effort: low|medium|high (default: harness default)",
@@ -202,7 +205,8 @@ program
         // the file overrides loupe's built-in default.
         const settings = opts.config ? loadSettings(opts.config) : {};
         const harnessName = opts.harness ?? settings.harness ?? "whip";
-        const model = opts.model ?? settings.model ?? "kimi-k3";
+        const model =
+          opts.model ?? settings.model ?? "moonshotai/kimi-k3.1-pro";
         const reasoningRaw = opts.reasoning ?? settings.reasoning;
         const reasoning = reasoningRaw
           ? parseReasoning(reasoningRaw)

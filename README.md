@@ -67,7 +67,7 @@ ANTHROPIC_API_KEY=sk-... \
 
 Token comes from `--token`, else `GITHUB_TOKEN`, else `gh auth token`.
 
-Key flags (defaults in parens): `--harness` (whip), `--model` (kimi-k3),
+Key flags (defaults in parens): `--harness` (whip), `--model` (moonshotai/kimi-k3.1-pro),
 `--reasoning low|medium|high` (harness default; passed natively), `--profile quiet|chill|assertive` (chill),
 `--config <path>` (focused reviewers), `--reviewer <name>` (run just one),
 `--prompt-file <path>` (custom guidance), `--dir` (subdir scope), `--ensemble`
@@ -130,7 +130,7 @@ its env-var name is in the config.
 ```json
 {
   "harness": "whip",
-  "model": "kimi-k3",
+  "model": "moonshotai/kimi-k3.1-pro",
   "timezone": "PST",
   "dir": "inference",
   "whip": {
@@ -139,7 +139,7 @@ its env-var name is in the config.
       "baseUrl": "https://api.inference.net/v1",
       "apiKeyEnv": "INFERENCE_API_KEY"
     },
-    "models": ["kimi-k3", "glm-5.3-flash", "gpt-5.6-luna"]
+    "models": ["moonshotai/kimi-k3.1-pro", "glm-5.3-flash", "gpt-5.6-luna"]
   },
   "reviewers": [{ "name": "bugs", "promptFile": "reviewers/bugs.md" }]
 }

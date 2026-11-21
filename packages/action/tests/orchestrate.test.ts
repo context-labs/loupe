@@ -133,7 +133,7 @@ function baseConfig(
     workdir: "/tmp",
     conventionPaths: [],
     providers: [],
-    model: "kimi-k3",
+    model: "moonshotai/kimi-k3.1-pro",
     verify: true,
     full: false,
     ensembleModels: [],

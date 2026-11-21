@@ -18,8 +18,8 @@ const base: WhipConfig = {
     apiKeyEnv: "INFERENCE_API_KEY",
     label: "Inference.net",
   },
-  models: ["kimi-k3", "glm-5.3-flash", "gpt-5.6-luna"],
-  defaultModel: "kimi-k3",
+  models: ["moonshotai/kimi-k3.1-pro", "glm-5.3-flash", "gpt-5.6-luna"],
+  defaultModel: "moonshotai/kimi-k3.1-pro",
 };
 
 function writtenConfig(
@@ -40,7 +40,7 @@ describe("materializeWhipHome", () => {
   it("writes a WHIP_HOME config with the provider and full model panel", () => {
     const { env, config } = writtenConfig(base);
     expect(env["WHIP_HOME"]).toBeTruthy();
-    expect(config["defaultModel"]).toBe("kimi-k3");
+    expect(config["defaultModel"]).toBe("moonshotai/kimi-k3.1-pro");
     expect(config["defaultProvider"]).toBe("inference-net");
     expect(config["providers"]).toEqual({
       "inference-net": {
@@ -51,7 +51,7 @@ describe("materializeWhipHome", () => {
       },
     });
     expect(Object.keys(config["models"] as object)).toEqual([
-      "kimi-k3",
+      "moonshotai/kimi-k3.1-pro",
       "glm-5.3-flash",
       "gpt-5.6-luna",
     ]);
@@ -67,7 +67,7 @@ describe("materializeWhipHome", () => {
         baseUrl: "https://api.inference.net/v1",
         apiKeyEnv: "INFERENCE_API_KEY",
       },
-      models: ["glm-5.3-flash", "kimi-k3"],
+      models: ["glm-5.3-flash", "moonshotai/kimi-k3.1-pro"],
     });
     expect(config["defaultModel"]).toBe("glm-5.3-flash");
     expect(

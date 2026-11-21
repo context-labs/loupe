@@ -149,7 +149,7 @@ describe("whip provider egress validation (F-90)", () => {
     reviewers: [{ name: "code", prompt: "x" }],
     whip: {
       provider: { name: "p", ...provider },
-      models: ["kimi-k3"],
+      models: ["moonshotai/kimi-k3.1-pro"],
     },
   });
 

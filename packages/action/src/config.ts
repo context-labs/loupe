@@ -193,7 +193,7 @@ export function loadConfig(
       .filter(Boolean),
     providers: buildProviders(env),
     dirs: asDirs(env.LOUPE_DIR) ?? file.dirs,
-    model: env.LOUPE_MODEL ?? file.model ?? "kimi-k3",
+    model: env.LOUPE_MODEL ?? file.model ?? "moonshotai/kimi-k3.1-pro",
     reasoning: asReasoning(env.LOUPE_REASONING) ?? file.reasoning,
     guidance: env.LOUPE_PROMPT_FILE
       ? readFileSync(inWorkspace(env.LOUPE_PROMPT_FILE), "utf8")
