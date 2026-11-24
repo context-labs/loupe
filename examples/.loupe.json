@@ -13,7 +13,6 @@
     "defaultModel": "moonshotai/kimi-k3.1-pro",
     "models": [
       "moonshotai/kimi-k3.1-pro",
-      "moonshotai/kimi-k3.1-pro-fast",
       "glm-5.3-flash",
       "glm-5.2-fast",
       "deepseek-v4-pro-0813",
