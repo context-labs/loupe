@@ -1034,6 +1034,15 @@ export async function upsertCombinedSummary(
   }
 }
 
+/** GitHub's 422 for a REQUEST_CHANGES review on a PR the caller authored. */
+export function isOwnPullRequestRejection(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    status === 422 && /request changes on your own pull request/i.test(message)
+  );
+}
+
 export async function postReview(
   octokit: Octokit,
   ref: PullRef,
@@ -1091,9 +1100,8 @@ export async function postReview(
   );
 
   if (inline.length > 0 || hasBlocker) {
-    await octokit.pulls.createReview({
+    const review = {
       ...ref,
-      event: hasBlocker ? "REQUEST_CHANGES" : "COMMENT",
       // GitHub requires content when a review has no inline comments. Keep that
       // body visually empty while preserving PR-level blocker verdicts.
       body: inline.length > 0 ? "" : tag,
@@ -1102,7 +1110,24 @@ export async function postReview(
         line: f.line,
         body: `${SEV_EMOJI[f.severity]} **${f.severity}** ${f.body}\n\n${tag}`,
       })),
-    });
+    };
+    try {
+      await octokit.pulls.createReview({
+        ...review,
+        event: hasBlocker ? "REQUEST_CHANGES" : "COMMENT",
+      });
+    } catch (err) {
+      // GitHub rejects REQUEST_CHANGES (422) when the token's identity authored
+      // the PR, e.g. bot-opened promotion PRs reviewed with the same
+      // github-actions token. Still post the findings as a plain COMMENT
+      // review; the blocker severity stays visible on each comment and in the
+      // summary, only the changes-requested verdict is lost.
+      if (!hasBlocker || !isOwnPullRequestRejection(err)) throw err;
+      logger.warn(
+        "cannot request changes on own pull request; posting blocker findings as a COMMENT review",
+      );
+      await octokit.pulls.createReview({ ...review, event: "COMMENT" });
+    }
   }
 
   if (!opts.deferSummary) {

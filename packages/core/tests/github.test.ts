@@ -241,6 +241,79 @@ describe("GitHub review publishing", () => {
   });
 });
 
+describe("postReview on the token identity's own PR", () => {
+  const blockerOutput = {
+    ...output,
+    concerns: [
+      {
+        severity: "blocker" as const,
+        title: "Unsafe rollout",
+        detail: "Old pods cannot handle this.",
+      },
+    ],
+  };
+  const ownPrError = Object.assign(
+    new Error(
+      'Unprocessable Entity: "Review Can not request changes on your own pull request"',
+    ),
+    { status: 422 },
+  );
+
+  it("falls back to a COMMENT review with the same findings", async () => {
+    api = octokit();
+    api.pulls.createReview
+      .mockRejectedValueOnce(ownPrError)
+      .mockResolvedValueOnce({});
+    const finding = {
+      path: "src/a.ts",
+      line: 2,
+      severity: "blocker" as const,
+      body: "Breaks old pods",
+    };
+    await postReview(api as never, ref, blockerOutput, [finding], [], logger, {
+      reviewerName: "side-effects",
+      headSha: "f".repeat(40),
+      fileCount: 1,
+    });
+
+    expect(api.pulls.createReview).toHaveBeenCalledTimes(2);
+    expect(api.pulls.createReview).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ event: "REQUEST_CHANGES" }),
+    );
+    expect(api.pulls.createReview).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        event: "COMMENT",
+        comments: [
+          expect.objectContaining({
+            path: "src/a.ts",
+            body: expect.stringContaining("**blocker** Breaks old pods"),
+          }),
+        ],
+      }),
+    );
+    expect(api.issues.createComment).toHaveBeenCalled();
+  });
+
+  it("rethrows other review errors", async () => {
+    api = octokit();
+    api.pulls.createReview.mockRejectedValueOnce(
+      Object.assign(new Error("Validation Failed: line not in diff"), {
+        status: 422,
+      }),
+    );
+    await expect(
+      postReview(api as never, ref, blockerOutput, [], [], logger, {
+        reviewerName: "side-effects",
+        headSha: "f".repeat(40),
+        fileCount: 1,
+      }),
+    ).rejects.toThrow("line not in diff");
+    expect(api.pulls.createReview).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("getLastReviewedSha", () => {
   it("reads the reviewed SHA from the persistent summary", async () => {
     api = octokit({
