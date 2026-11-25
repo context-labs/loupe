@@ -77,12 +77,14 @@ describe("buildSystemPrompt reasoning", () => {
 });
 
 describe("buildVerifySystemPrompt", () => {
-  it("headless mode fails closed: rejects findings that depend on code outside the diff", () => {
+  it("headless mode keeps unverifiable cross-file findings, rejecting only diff-contradicted ones", () => {
     const p = buildVerifySystemPrompt();
     expect(p).toContain("headless with NO repository access");
-    expect(p).toContain("speculative from the diff alone: reject it");
-    // The old fail-open "outside-diff" acquittal is gone.
-    expect(p).not.toContain("outside-diff");
+    // It rejects only what the diff itself disproves...
+    expect(p).toContain("ONLY when the diff itself shows");
+    // ...and must NOT drop a cross-file claim it cannot disprove.
+    expect(p).toContain("must NOT reject it on that basis");
+    expect(p).toContain("keep it");
   });
   it("agentic mode instructs the verifier to read surrounding code and refute false claims", () => {
     const p = buildVerifySystemPrompt({ agentic: true });

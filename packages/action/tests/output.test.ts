@@ -10,7 +10,12 @@ import {
   CombinedSummaryPublicationError,
   type ReviewerOutcome,
 } from "../src/orchestrate";
-import { setOutput, statusForError, statusForOutcomes } from "../src/output";
+import {
+  annotateFailure,
+  setOutput,
+  statusForError,
+  statusForOutcomes,
+} from "../src/output";
 
 let outputDir: string;
 let outputFile: string;
@@ -41,6 +46,44 @@ describe("setOutput", () => {
   it("is a no-op when GITHUB_OUTPUT is unset", () => {
     delete process.env["GITHUB_OUTPUT"];
     setOutput("status", "ok"); // must not throw
+  });
+});
+
+describe("annotateFailure", () => {
+  afterEach(() => {
+    delete process.env["GITHUB_ACTIONS"];
+  });
+
+  it("writes a GitHub error-annotation command on one line under Actions", () => {
+    process.env["GITHUB_ACTIONS"] = "true";
+    const writes: string[] = [];
+    const spy = (s: string) => (writes.push(s), true);
+    const orig = process.stdout.write.bind(process.stdout);
+    process.stdout.write = spy as typeof process.stdout.write;
+    try {
+      annotateFailure("code (quota)\nsecond line");
+    } finally {
+      process.stdout.write = orig;
+    }
+    expect(writes.join("")).toBe(
+      "::error title=loupe review failed::code (quota) second line\n",
+    );
+  });
+
+  it("is a no-op outside GitHub Actions", () => {
+    delete process.env["GITHUB_ACTIONS"];
+    const writes: string[] = [];
+    const orig = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => (
+      writes.push(s),
+      true
+    )) as typeof process.stdout.write;
+    try {
+      annotateFailure("should not print");
+    } finally {
+      process.stdout.write = orig;
+    }
+    expect(writes).toHaveLength(0);
   });
 });
 

@@ -903,20 +903,30 @@ export async function produceReview(
 
   if (ensemble) {
     logger.info("Ensemble review", { models: ensemble });
+    // Legs are independent model calls; run them concurrently and keep input
+    // order (allSettled preserves it) so "first survivor" below still means the
+    // first configured leg that lived. A rejected leg degrades the ensemble
+    // without taking down the survivors, exactly as the serial version did.
+    const settled = await Promise.allSettled(
+      ensemble.map((model) => produceOne(model, "ensemble")),
+    );
     const runs: { inline: Finding[]; review: ReviewOutput; dropped: Note[] }[] =
       [];
-    for (const model of ensemble) {
-      try {
-        runs.push(await produceOne(model, "ensemble"));
-      } catch (err) {
-        const legModel = model ?? "(harness default)";
-        failedLegs.push(legModel);
-        logger.warn("Ensemble leg failed; degrading to remaining models", {
-          model: legModel,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    settled.forEach((result, i) => {
+      if (result.status === "fulfilled") {
+        runs.push(result.value);
+        return;
       }
-    }
+      const legModel = ensemble[i] ?? "(harness default)";
+      failedLegs.push(legModel);
+      logger.warn("Ensemble leg failed; degrading to remaining models", {
+        model: legModel,
+        error:
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason),
+      });
+    });
     // Borrow the review narrative (summary) from the first surviving leg, not
     // the first configured leg — the first leg may be one that failed. Merging
     // prose summaries across models reads worse than picking one, so the first
@@ -973,7 +983,6 @@ export async function produceReview(
       files,
       inline,
       harnessCwd,
-      agentic,
       hasCheckout,
       subdir && harnessCwd === scoped ? subdir : undefined,
     );
@@ -1118,11 +1127,14 @@ async function verifyInline(
   files: readonly { path: string; patch: string | undefined }[],
   findings: readonly Finding[],
   harnessCwd: string,
-  agentic: boolean,
   hasCheckout: boolean,
   cwdSubdir?: string,
 ): Promise<{ kept: Finding[]; status: ReviewDiagnostics["verify"] }> {
-  const verifyAgentic = agentic && hasCheckout;
+  // Verify agentically whenever a real checkout exists — even if the primary
+  // ran headless. A reading verifier can confirm/refute cross-file claims; a
+  // headless one can only guess and (per its directive) drops them, losing true
+  // positives. The checkout is the only thing agentic verify actually needs.
+  const verifyAgentic = hasCheckout;
   try {
     const stdout = await req.harness.review({
       systemPrompt: buildVerifySystemPrompt({ agentic: verifyAgentic }),

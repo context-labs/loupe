@@ -2,8 +2,17 @@
 import { createRootLogger, shutdownLogger } from "@loupe/logger";
 
 import { loadConfig } from "./config";
-import { setOutput, statusForError, statusForOutcomes } from "./output";
-import { runReviews, CombinedSummaryPublicationError } from "./orchestrate";
+import {
+  annotateFailure,
+  setOutput,
+  statusForError,
+  statusForOutcomes,
+} from "./output";
+import {
+  runReviews,
+  CombinedSummaryPublicationError,
+  type ReviewerOutcome,
+} from "./orchestrate";
 import { handleComment } from "./respond";
 
 const logger = createRootLogger("loupe-action");
@@ -31,12 +40,31 @@ async function main(): Promise<void> {
     // handleComment; return their outcomes so a chat-triggered quota/rate-limit
     // failure surfaces as status too, closing the same silent-green gap.
     const outcomes = await handleComment(config, logger);
-    if (outcomes) setOutput("status", statusForOutcomes(outcomes));
+    if (outcomes) {
+      annotateFailures(outcomes);
+      setOutput("status", statusForOutcomes(outcomes));
+    }
     return;
   }
   const outcomes = await runReviews(config, logger);
   if (outcomes.some((o) => !o.ok)) process.exitCode = 1;
+  annotateFailures(outcomes);
   setOutput("status", statusForOutcomes(outcomes));
+}
+
+/**
+ * Surface any failed reviewer as a GitHub Actions error annotation. The
+ * per-reviewer failure path keeps the run non-blocking (a green-ish check), so
+ * without this a quota/rate-limit/crash is only a ⚠️ PR comment nobody is paged
+ * on; the annotation makes it visible on the run itself.
+ */
+function annotateFailures(outcomes: readonly ReviewerOutcome[]): void {
+  const failed = outcomes.filter((o) => !o.ok);
+  if (failed.length === 0) return;
+  const detail = failed
+    .map((o) => `${o.name} (${("kind" in o && o.kind) || "failed"})`)
+    .join(", ");
+  annotateFailure(`${failed.length} reviewer(s) failed: ${detail}`);
 }
 
 main()
@@ -44,6 +72,9 @@ main()
     logger.error("loupe failed", {
       error: err instanceof Error ? err.message : String(err),
     });
+    annotateFailure(
+      `loupe run failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
     // The reviewers may have finished before the summary post threw; if so,
     // surface the run's real status from those outcomes rather than a blanket
     // "failed", which would hide a quota/rate-limit failure this change targets.

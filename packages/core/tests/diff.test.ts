@@ -222,10 +222,11 @@ describe("parseVerification", () => {
 });
 
 describe("buildVerifySystemPrompt", () => {
-  it("headless mode rejects outside-diff claims instead of acquitting them", () => {
+  it("headless mode keeps unverifiable outside-diff claims, rejecting only diff-contradicted ones", () => {
     const prompt = buildVerifySystemPrompt();
     expect(prompt).toContain("headless with NO repository access");
-    expect(prompt).toContain("speculative from the diff alone: reject it");
+    expect(prompt).toContain("ONLY when the diff itself shows");
+    expect(prompt).toContain("must NOT reject it on that basis");
   });
   it("agentic mode instructs the verifier to read surrounding code", () => {
     const prompt = buildVerifySystemPrompt({ agentic: true });
