@@ -175,6 +175,21 @@ function enclosingFunction(
   return undefined;
 }
 
+/**
+ * True when `lines` contains an import/require statement that pulls in `name`.
+ * A sibling package that imports a symbol of the same name as a changed export
+ * is almost certainly consuming that export; an unrelated same-named function
+ * defined locally has no such import. This gate is what lets the caller search
+ * cross the package boundary without dragging in same-name collisions.
+ */
+function importsSymbol(lines: readonly string[], name: string): boolean {
+  const re = new RegExp(`\\b${name}\\b`);
+  for (const l of lines) {
+    if (/\b(?:import|require)\b/.test(l) && re.test(l)) return true;
+  }
+  return false;
+}
+
 function withContext(lines: readonly string[], site: CallSite): CallSite {
   const ctx: string[] = [];
   for (let i = site.line - 2; i >= 0 && ctx.length < 4; i--) {
@@ -256,7 +271,60 @@ export function transitiveCallSites(
     }
     frontier = next;
   }
-  return groups;
+
+  // Cross-package callers. The per-package search above deliberately scopes each
+  // export to its own package to avoid same-named functions in unrelated
+  // packages, but that hides the one caller a monorepo change most often
+  // breaks: a sibling package that imports the changed export. Search the whole
+  // checkout for the changed exports and keep a site only when its file is in a
+  // different package AND imports the symbol — the import gate separates a real
+  // consumer from an unrelated same-named definition.
+  const declRoot = new Map(
+    changed.map((c) => [c.name, packageRoot(cwd, c.file)]),
+  );
+  const wide = findCallSites(
+    cwd,
+    changed.map((c) => c.name),
+    excludePaths,
+  );
+  const crossByName = new Map<string, CallSite[]>();
+  for (const c of changed) {
+    if (crossByName.has(c.name)) continue;
+    const extra = (wide.get(c.name) ?? [])
+      .filter(
+        (s) =>
+          packageRoot(cwd, s.path) !== declRoot.get(c.name) &&
+          !FN_DECL.test(s.text) &&
+          !/^import\b/.test(s.text) &&
+          importsSymbol(linesOf(cache, cwd, s.path), c.name),
+      )
+      .map((s) => withContext(linesOf(cache, cwd, s.path), s));
+    if (extra.length > 0) crossByName.set(c.name, extra);
+  }
+  if (crossByName.size === 0) return groups;
+
+  // Merge cross-package sites into each changed export's existing group (or add
+  // a group when its only callers are cross-package), deduped by path:line.
+  const merged: CallSiteGroup[] = [];
+  const done = new Set<string>();
+  for (const g of groups) {
+    const extra = g.via ? undefined : crossByName.get(g.name);
+    if (!extra) {
+      merged.push(g);
+      continue;
+    }
+    const seenSite = new Set(g.sites.map((s) => `${s.path}:${s.line}`));
+    const add = extra.filter((s) => !seenSite.has(`${s.path}:${s.line}`));
+    merged.push(add.length ? { ...g, sites: [...g.sites, ...add] } : g);
+    done.add(g.name);
+  }
+  for (const c of changed) {
+    const extra = crossByName.get(c.name);
+    if (!extra || done.has(c.name)) continue;
+    merged.push({ name: c.name, sites: extra });
+    done.add(c.name);
+  }
+  return merged;
 }
 
 /** Prompt section: one block per export with its callers outside the diff. */
