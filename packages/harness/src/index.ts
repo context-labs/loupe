@@ -590,7 +590,7 @@ export function whipHarness(): Harness {
       // Agentic reviews need room to explore the checkout with tools; headless
       // diff-only reviews should answer in one turn, capped as a safety net.
       // The agentic cap is configurable (config.json maxTurns / --max-turns).
-      const maxTurns = ctx.agentic ? String(ctx.maxTurns ?? 10) : "10";
+      const maxTurns = ctx.agentic ? String(ctx.maxTurns ?? 20) : "10";
       const args = [
         "run",
         "--format",

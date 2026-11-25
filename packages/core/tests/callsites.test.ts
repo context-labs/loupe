@@ -157,6 +157,52 @@ describe("transitiveCallSites", () => {
   });
 });
 
+describe("transitiveCallSites cross-package", () => {
+  it("finds a sibling package that imports the changed export, but not an unrelated same-named function", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "loupe-xpkg-"));
+    for (const d of ["pkg/core/src", "pkg/consumer/src", "pkg/other/src"]) {
+      mkdirSync(join(cwd, d), { recursive: true });
+    }
+    writeFileSync(join(cwd, "pkg/core/package.json"), '{"name":"@acme/core"}');
+    writeFileSync(
+      join(cwd, "pkg/consumer/package.json"),
+      '{"name":"@acme/consumer"}',
+    );
+    writeFileSync(
+      join(cwd, "pkg/other/package.json"),
+      '{"name":"@acme/other"}',
+    );
+    writeFileSync(
+      join(cwd, "pkg/core/src/plan.ts"),
+      "export function applyPlan() {}\n",
+    );
+    // Real consumer: different package, imports the symbol.
+    writeFileSync(
+      join(cwd, "pkg/consumer/src/use.ts"),
+      [
+        'import { applyPlan } from "@acme/core";',
+        "export function checkout() {",
+        "  applyPlan();",
+        "}",
+      ].join("\n"),
+    );
+    // Decoy: different package, same-named local function, no import of ours.
+    writeFileSync(
+      join(cwd, "pkg/other/src/x.ts"),
+      "export function applyPlan() {}\napplyPlan();\n",
+    );
+
+    const groups = transitiveCallSites(
+      cwd,
+      [{ name: "applyPlan", file: "pkg/core/src/plan.ts" }],
+      new Set(["pkg/core/src/plan.ts"]),
+    );
+    const sitePaths = groups.flatMap((g) => g.sites.map((s) => s.path));
+    expect(sitePaths).toContain("pkg/consumer/src/use.ts");
+    expect(sitePaths.some((p) => p.startsWith("pkg/other/"))).toBe(false);
+  });
+});
+
 describe("elixir", () => {
   it("treats def/defmacro as changed exports and mix.exs as the package root", () => {
     const names = changedExports([
