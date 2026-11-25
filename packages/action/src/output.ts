@@ -16,6 +16,20 @@ export function setOutput(name: string, value: string): void {
 }
 
 /**
+ * Emit a GitHub Actions error annotation. Annotations render on the run summary
+ * and in the PR's Checks tab EVEN when the step is `continue-on-error: true` —
+ * which the recommended loupe workflow is — so a real failure (quota/429/E2BIG)
+ * is no longer invisible behind a green check. No-op outside Actions so the CLI
+ * and unit tests stay silent.
+ */
+export function annotateFailure(message: string): void {
+  if (!process.env["GITHUB_ACTIONS"]) return;
+  // Workflow commands are newline-delimited; keep the whole message on one line.
+  const oneLine = message.replace(/\r?\n/g, " ").slice(0, 800);
+  process.stdout.write(`::error title=loupe review failed::${oneLine}\n`);
+}
+
+/**
  * Map a thrown error to the action's `status` output value. Quota and
  * rate-limit harness failures are surfaced distinctly so a workflow can route
  * them differently (ping #billing for quota, auto-requeue for rate-limit);

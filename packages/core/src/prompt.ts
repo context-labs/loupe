@@ -357,10 +357,13 @@ export function buildUserPrompt(input: UserPromptInput): string {
  */
 const HEADLESS_VERIFY_DIRECTIVE = `
 You are running headless with NO repository access. Judge each finding ONLY from
-the diff provided. A finding that depends on code outside the diff — what a
-caller does, whether a field is documented, whether a method is safe — is
-speculative from the diff alone: reject it. Also reject findings that are
-factually wrong about what the diff does, or duplicates.`.trim();
+the diff provided. Reject (real: false) a finding ONLY when the diff itself shows
+it is wrong: it contradicts what the diff plainly does, or it duplicates another
+finding. A finding that depends on code outside the diff — what a caller does,
+whether a field is documented, whether a method is safe — you cannot disprove
+from the diff alone, so you must NOT reject it on that basis; keep it (real:
+true). Rejecting an unverifiable cross-file claim just discards a real bug you
+couldn't see.`.trim();
 
 const AGENTIC_VERIFY_DIRECTIVE = `
 You HAVE repository access: the full checkout is your working directory and you

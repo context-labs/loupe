@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -149,6 +149,37 @@ function childEnv(ctxEnv: Record<string, string>): Record<string, string> {
   return { ...env, ...ctxEnv };
 }
 
+/**
+ * Hard ceiling on a single harness subprocess, so a model that hangs (stuck
+ * stream, wedged tool loop) is bounded rather than consuming the whole CI job's
+ * wall-clock. Overridable via LOUPE_HARNESS_TIMEOUT_MS; default 15 minutes —
+ * comfortably above a real agentic run, well below a GitHub Actions job timeout.
+ */
+const HARNESS_TIMEOUT_MS = (() => {
+  const raw = Number(process.env["LOUPE_HARNESS_TIMEOUT_MS"]);
+  return Number.isFinite(raw) && raw > 0 ? raw : 15 * 60_000;
+})();
+
+/**
+ * Kill `child` if it outlives the timeout and reject with a classifiable error.
+ * Returns a clear() the caller invokes on normal completion. A post-kill
+ * `close`/`error` that rejects again is a harmless no-op on a settled promise.
+ */
+export function armTimeout(
+  child: Pick<ChildProcess, "kill">,
+  label: string,
+  reject: (err: HarnessError) => void,
+): () => void {
+  const timer = setTimeout(() => {
+    child.kill("SIGKILL");
+    reject(
+      new HarnessError(`${label} timed out after ${HARNESS_TIMEOUT_MS}ms`),
+    );
+  }, HARNESS_TIMEOUT_MS);
+  timer.unref?.();
+  return () => clearTimeout(timer);
+}
+
 function commandExists(cmd: string): Promise<boolean> {
   return new Promise((resolve) => {
     const p = spawn("which", [cmd], { stdio: "ignore" });
@@ -191,6 +222,7 @@ export function runCli(
       cwd: ctx.workdir,
       env: childEnv(ctx.env),
     });
+    const clearTimer = armTimeout(child, cmd, reject);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => {
@@ -204,12 +236,14 @@ export function runCli(
       log.debug(chunk.trimEnd());
     });
     child.on("error", (err) => {
+      clearTimer();
       emit({ type: "error", error: err.message });
       reject(
         new HarnessError(err instanceof Error ? err.message : String(err)),
       );
     });
     child.on("close", (code) => {
+      clearTimer();
       log.debug("Harness exited", { code, stdoutChars: stdout.length });
       log.debug("Harness stdout", { stdout });
       if (code === 0) {
@@ -326,6 +360,7 @@ export function runWhipStreaming(
       cwd: ctx.workdir,
       env: childEnv(ctx.env),
     });
+    const clearTimer = armTimeout(child, "whip", reject);
     let buffer = ""; // partial NDJSON line
     let text = ""; // accumulated assistant reply
     let logged = 0; // chars already flushed to the log
@@ -419,10 +454,12 @@ export function runWhipStreaming(
       stderr += chunk;
       log.debug(chunk.trimEnd());
     });
-    child.on("error", (e) =>
-      reject(new HarnessError(e instanceof Error ? e.message : String(e))),
-    );
+    child.on("error", (e) => {
+      clearTimer();
+      reject(new HarnessError(e instanceof Error ? e.message : String(e)));
+    });
     child.on("close", (code) => {
+      clearTimer();
       if (buffer.trim()) handle(buffer);
       const out = final ?? text;
       log.debug("Harness exited", { code, replyChars: out.length });
