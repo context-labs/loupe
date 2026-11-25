@@ -66,6 +66,54 @@ import {
 import { renderDiff, type DiffFile } from "./diff";
 import { validateFindings } from "./validate";
 
+const RATE_LIMIT_RETRIES = 2;
+/** Base backoff, doubled each attempt. Overridable via LOUPE_RATE_LIMIT_BASE_MS. */
+const RATE_LIMIT_BASE_MS = 2000;
+
+/** Parse a "retry after N" / "Retry-After: N" (seconds) hint from a provider
+ * error message, in ms, if present. */
+function retryAfterMs(message: string): number | undefined {
+  const m = /retry[-\s]?after[:\s]+(\d+)/i.exec(message);
+  return m ? Number(m[1]) * 1000 : undefined;
+}
+
+/**
+ * Run `fn`, retrying only on a `rate-limit` HarnessError with exponential
+ * backoff (honoring a parseable Retry-After). A 429 is transient — the provider
+ * is telling us to wait, not that the request is doomed — so a single one should
+ * not lose a reviewer. Quota (402) and every other kind are NOT retried: they
+ * are not helped by waiting. `sleep` is injectable so the backoff is testable
+ * without real time.
+ */
+export async function withRateLimitRetry<T>(
+  fn: () => Promise<T>,
+  opts: {
+    retries?: number;
+    baseMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    onRetry?: (attempt: number, waitMs: number, err: HarnessError) => void;
+  } = {},
+): Promise<T> {
+  const retries = opts.retries ?? RATE_LIMIT_RETRIES;
+  const envBase = Number(process.env["LOUPE_RATE_LIMIT_BASE_MS"]);
+  const baseMs =
+    opts.baseMs ?? (Number.isFinite(envBase) ? envBase : RATE_LIMIT_BASE_MS);
+  const sleep =
+    opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const rateLimited =
+        err instanceof HarnessError && err.kind === "rate-limit";
+      if (!rateLimited || attempt >= retries) throw err;
+      const waitMs = retryAfterMs(err.message) ?? baseMs * 2 ** attempt;
+      opts.onRetry?.(attempt + 1, waitMs, err);
+      await sleep(waitMs);
+    }
+  }
+}
+
 /**
  * Write the full unified diff to a throwaway temp file and return its path, so
  * an agentic review can read hunks from it on demand instead of carrying the
@@ -822,25 +870,34 @@ export async function produceReview(
       cwd: harnessCwd,
     });
     const run = (useAgentic: boolean, phase: string) =>
-      req.harness
-        .review({
-          systemPrompt: useAgentic
-            ? systemPrompt
-            : buildSystemPrompt({ ...promptOpts, agentic: false }),
-          userPrompt: useAgentic ? agenticUserPrompt : headlessUserPrompt,
-          model,
-          agentic: useAgentic,
-          workdir: harnessCwd,
-          env: req.harnessEnv,
-          whipConfig: req.whipConfig,
-          maxTurns: req.maxTurns,
-          reasoning: req.reasoning,
-          cacheKey,
-          trace: req.trace,
-          phase,
-          logger,
-        })
-        .then(parseReviewOutput);
+      withRateLimitRetry(
+        () =>
+          req.harness.review({
+            systemPrompt: useAgentic
+              ? systemPrompt
+              : buildSystemPrompt({ ...promptOpts, agentic: false }),
+            userPrompt: useAgentic ? agenticUserPrompt : headlessUserPrompt,
+            model,
+            agentic: useAgentic,
+            workdir: harnessCwd,
+            env: req.harnessEnv,
+            whipConfig: req.whipConfig,
+            maxTurns: req.maxTurns,
+            reasoning: req.reasoning,
+            cacheKey,
+            trace: req.trace,
+            phase,
+            logger,
+          }),
+        {
+          onRetry: (attempt, waitMs) =>
+            logger.warn("Rate-limited; backing off before retry", {
+              attempt,
+              waitMs,
+              phase,
+            }),
+        },
+      ).then(parseReviewOutput);
     let parsed;
     try {
       parsed = await run(agentic, model ? `${tag}:${model}` : tag);
@@ -1136,26 +1193,36 @@ async function verifyInline(
   // positives. The checkout is the only thing agentic verify actually needs.
   const verifyAgentic = hasCheckout;
   try {
-    const stdout = await req.harness.review({
-      systemPrompt: buildVerifySystemPrompt({ agentic: verifyAgentic }),
-      userPrompt: buildVerifyUserPrompt(findings, files, {
-        cwdSubdir: verifyAgentic ? cwdSubdir : undefined,
-      }),
-      model: req.model,
-      agentic: verifyAgentic,
-      workdir: harnessCwd,
-      env: req.harnessEnv,
-      whipConfig: req.whipConfig,
-      maxTurns: req.maxTurns,
-      reasoning: req.reasoning,
-      cacheKey:
-        req.promptCache !== false
-          ? `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`
-          : undefined,
-      trace: req.trace,
-      phase: req.model ? `verify:${req.model}` : "verify",
-      logger: req.logger,
-    });
+    const stdout = await withRateLimitRetry(
+      () =>
+        req.harness.review({
+          systemPrompt: buildVerifySystemPrompt({ agentic: verifyAgentic }),
+          userPrompt: buildVerifyUserPrompt(findings, files, {
+            cwdSubdir: verifyAgentic ? cwdSubdir : undefined,
+          }),
+          model: req.model,
+          agentic: verifyAgentic,
+          workdir: harnessCwd,
+          env: req.harnessEnv,
+          whipConfig: req.whipConfig,
+          maxTurns: req.maxTurns,
+          reasoning: req.reasoning,
+          cacheKey:
+            req.promptCache !== false
+              ? `loupe/${req.ref.owner}/${req.ref.repo}/${req.reviewerName ?? "default"}/verify`
+              : undefined,
+          trace: req.trace,
+          phase: req.model ? `verify:${req.model}` : "verify",
+          logger: req.logger,
+        }),
+      {
+        onRetry: (attempt, waitMs) =>
+          req.logger.warn("Rate-limited on verify; backing off before retry", {
+            attempt,
+            waitMs,
+          }),
+      },
+    );
     const result = parseVerification(stdout, findings.length);
     if (!result.valid) {
       req.logger.warn("Verification output invalid; keeping all findings", {

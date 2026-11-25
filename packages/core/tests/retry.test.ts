@@ -74,12 +74,25 @@ describe("agentic→one-shot retry guard", () => {
     expect(calls[0]?.agentic).toBe(true);
   });
 
-  it("re-throws a rate-limit HarnessError without the one-shot fallback", async () => {
-    const { harness, calls } = fakeHarness(
-      new HarnessError("429 Too Many Requests", "rate-limit"),
-    );
-    await expect(runReviewWith(harness)).rejects.toBeInstanceOf(HarnessError);
-    expect(calls).toHaveLength(1);
+  it("retries a rate-limit HarnessError in the same mode (not a one-shot fallback)", async () => {
+    // A 429 is transient: back off and retry the SAME (agentic) call rather than
+    // switching to the headless fallback. With no backoff delay the retry (2nd
+    // call) returns the fake's valid empty review, so the reviewer recovers.
+    process.env["LOUPE_RATE_LIMIT_BASE_MS"] = "0";
+    try {
+      const { harness, calls } = fakeHarness(
+        new HarnessError("429 Too Many Requests", "rate-limit"),
+      );
+      const result = await runReviewWith(harness);
+      expect(result).toBeDefined();
+      expect(calls).toHaveLength(2);
+      // Both attempts are agentic — a retry, not the headless (agentic:false)
+      // fallback the unknown-error path takes.
+      expect(calls[0]?.agentic).toBe(true);
+      expect(calls[1]?.agentic).toBe(true);
+    } finally {
+      delete process.env["LOUPE_RATE_LIMIT_BASE_MS"];
+    }
   });
 
   it("still falls back to one-shot for an unknown HarnessError", async () => {
