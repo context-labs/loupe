@@ -24,9 +24,11 @@ import {
   changedFilesBetween,
   checkPublishable,
   cleanupStrandedThreads,
+  dismissalKey,
   fetchConventions,
   fetchPullContext,
   getLastReviewed,
+  listResolvedLoupeFindings,
   postReview,
   type PriorComments,
   type PullRef,
@@ -269,6 +271,7 @@ const CLEAN_DIAGNOSTICS: ReviewDiagnostics = {
   outOfScopeDropped: 0,
   profileDropped: 0,
   verifyDropped: 0,
+  dismissedDropped: 0,
   crossReviewerDropped: 0,
   offDiff: 0,
   cappedDropped: 0,
@@ -386,6 +389,46 @@ export type PublishOptions = {
  * updated `diagnostics` so only the surviving findings post and the run-details
  * line reflects the suppressed duplicates.
  */
+/**
+ * Drop findings a human already RESOLVED on this PR (dismissed as not-a-bug, or
+ * fixed) so loupe does not re-raise them. This is loupe's one feedback loop —
+ * the resolved-thread signal it already has access to, used instead of thrown
+ * away. Matched by path + normalized body across all reviewers (a dismissal
+ * sticks whoever re-raises it). Runs only at publish time, so a dry run or an
+ * unpublishable PR never issues the lookup. Best-effort: a lookup failure posts
+ * everything rather than silently dropping the review.
+ */
+async function applyDismissals(
+  octokit: Octokit,
+  ref: PullRef,
+  findings: readonly Finding[],
+  logger: Logger,
+): Promise<{ kept: readonly Finding[]; dismissedDropped: number }> {
+  if (findings.length === 0) return { kept: findings, dismissedDropped: 0 };
+  try {
+    const resolved = await listResolvedLoupeFindings(octokit, ref);
+    if (resolved.length === 0) return { kept: findings, dismissedDropped: 0 };
+    const dismissed = new Set(
+      resolved.map((r) => dismissalKey(r.path, r.body)),
+    );
+    const kept = findings.filter(
+      (f) => !dismissed.has(dismissalKey(f.path, f.body)),
+    );
+    const dismissedDropped = findings.length - kept.length;
+    if (dismissedDropped > 0) {
+      logger.info("Suppressed findings a human already resolved", {
+        dropped: dismissedDropped,
+      });
+    }
+    return { kept, dismissedDropped };
+  } catch (err) {
+    logger.warn("Could not load resolved findings; skipping dismissal filter", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { kept: findings, dismissedDropped: 0 };
+  }
+}
+
 export async function publishReview(
   octokit: Octokit,
   ref: PullRef,
@@ -396,13 +439,24 @@ export async function publishReview(
   // Apply the comment cap here, on the deduped set, so what posts inline,
   // what renders as the summary's overflow section, and what the caller's
   // ReviewResult reports are consistent — and unique findings are only demoted
-  // after cross-reviewer dedupe has had its chance to free slots.
-  const uncapped = opts?.inline ?? produced.inline;
+  // after cross-reviewer dedupe has had its chance to free slots. The dismissal
+  // filter runs first: a finding a human already resolved should not even
+  // compete for a comment slot.
+  const baseDiagnostics = opts?.diagnostics ?? produced.diagnostics;
+  const { kept: afterDismissal, dismissedDropped } = await applyDismissals(
+    octokit,
+    ref,
+    opts?.inline ?? produced.inline,
+    logger,
+  );
   const { inline, overflow } = applyCommentCap(
-    uncapped,
+    afterDismissal,
     produced.commentCap ?? DEFAULT_MAX_COMMENTS,
   );
-  const diagnostics = opts?.diagnostics ?? produced.diagnostics;
+  const diagnostics =
+    dismissedDropped > 0
+      ? { ...baseDiagnostics, dismissedDropped }
+      : baseDiagnostics;
   const reviewForPost = reviewForPosting(
     produced.review,
     produced.uncertain,
@@ -1065,6 +1119,7 @@ export async function produceReview(
     outOfScopeDropped: counts.outOfScope,
     profileDropped: counts.profileDropped,
     verifyDropped,
+    dismissedDropped: 0, // set at publish time by applyDismissals
     crossReviewerDropped: 0,
     offDiff: dropped.length,
     cappedDropped: 0,

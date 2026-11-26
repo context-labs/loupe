@@ -4,9 +4,11 @@ import {
   checkPrOpen,
   checkPublishable,
   cleanupStrandedThreads,
+  dismissalKey,
   fetchPullContext,
   getLastReviewed,
   listOpenLoupeFindings,
+  listResolvedLoupeFindings,
   postReview,
   upsertCombinedSummary,
 } from "../src/github";
@@ -737,6 +739,7 @@ describe("summary rendering", () => {
           outOfScopeDropped: 0,
           profileDropped: 0,
           verifyDropped: 0,
+          dismissedDropped: 0,
           crossReviewerDropped: 0,
           cappedDropped: 0,
           offDiff: 1,
@@ -775,6 +778,7 @@ describe("summary rendering", () => {
           outOfScopeDropped: 0,
           profileDropped: 0,
           verifyDropped: 0,
+          dismissedDropped: 0,
           crossReviewerDropped: 0,
           cappedDropped: 0,
           offDiff: 1,
@@ -1449,5 +1453,54 @@ describe("pagination is capped (N11)", () => {
     const ctx = await fetchPullContext(api as never, ref);
     expect(callbackRuns).toBe(20); // MAX_PAGES
     expect(ctx.files).toHaveLength(20);
+  });
+});
+
+describe("listResolvedLoupeFindings", () => {
+  it("returns only the human-resolved loupe threads", async () => {
+    const sha = "a".repeat(40);
+    api = octokit({
+      threadPages: [
+        [
+          {
+            id: "open",
+            path: "src/a.ts",
+            line: 12,
+            root: {
+              body: `🟡 **warning** fix\n\n<!-- loupe:code sha=${sha} -->`,
+              login: "loupe-bot",
+            },
+          },
+          {
+            id: "resolved",
+            path: "src/b.ts",
+            isResolved: true,
+            root: {
+              body: `null deref\n\n<!-- loupe:code sha=${sha} -->`,
+              login: "loupe-bot",
+            },
+          },
+        ],
+      ],
+    });
+    const resolved = await listResolvedLoupeFindings(api as never, ref);
+    expect(resolved.map((r) => r.path)).toEqual(["src/b.ts"]);
+    expect(resolved[0]?.body).toBe("null deref");
+  });
+});
+
+describe("dismissalKey", () => {
+  it("matches a new finding to the posted form of the same finding", () => {
+    const posted = dismissalKey(
+      "src/a.ts",
+      "🔴 **blocker** Null deref when `x` is 0\n\n<!-- loupe:code sha=abc -->",
+    );
+    const raw = dismissalKey("src/a.ts", "Null deref when `x` is 0");
+    expect(posted).toBe(raw);
+  });
+
+  it("distinguishes different paths and different bodies", () => {
+    expect(dismissalKey("a.ts", "same")).not.toBe(dismissalKey("b.ts", "same"));
+    expect(dismissalKey("a.ts", "one")).not.toBe(dismissalKey("a.ts", "two"));
   });
 });

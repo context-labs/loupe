@@ -16,6 +16,7 @@ const diagnostics = {
   outOfScopeDropped: 0,
   profileDropped: 0,
   verifyDropped: 0,
+  dismissedDropped: 0,
   crossReviewerDropped: 0,
   offDiff: 0,
   cappedDropped: 0,

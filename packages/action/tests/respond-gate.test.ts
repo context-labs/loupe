@@ -45,6 +45,7 @@ const {
       outOfScopeDropped: 0,
       profileDropped: 0,
       verifyDropped: 0,
+      dismissedDropped: 0,
       offDiff: 0,
       salvagedFindings: 0,
     },
