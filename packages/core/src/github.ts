@@ -435,12 +435,28 @@ query LoupeReviewThreads($owner: String!, $repo: String!, $number: Int!, $after:
   }
 }`;
 
-/** List unresolved findings across configured reviewers, including findings
- * retained by incremental reviews from an earlier head. */
-export async function listOpenLoupeFindings(
+/**
+ * Normalized identity of a finding, for matching the same finding across runs:
+ * its path plus its body with the `emoji **severity**` prefix, loupe markers,
+ * and whitespace/case stripped. A new finding (`f.body`, no prefix) and the
+ * posted form of the same finding (`🔴 **blocker** …`) collapse to one key.
+ */
+export function dismissalKey(path: string, body: string): string {
+  const text = body
+    .replace(/<!--[^]*?-->/g, " ")
+    .replace(/^\s*\S*\s*\*\*[a-z]+\*\*\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  return `${path}\0${text}`;
+}
+
+/** Shared walker over this PR's loupe-authored review threads, selecting either
+ * the resolved or the unresolved ones. */
+async function listLoupeFindingsByResolution(
   octokit: Octokit,
   ref: PullRef,
-  _headSha: string,
+  resolved: boolean,
   reviewers?: ReadonlySet<string>,
 ): Promise<OpenLoupeFinding[]> {
   const self = await getSelfLogin(octokit);
@@ -459,7 +475,7 @@ export async function listOpenLoupeFindings(
     );
     const conn = page.repository.pullRequest.reviewThreads;
     for (const thread of conn.nodes) {
-      if (!thread || thread.isResolved) continue;
+      if (!thread || thread.isResolved !== resolved) continue;
       const root = thread.comments.nodes[0];
       const rootAuthor = root?.author?.login;
       const authoredBySelf =
@@ -492,6 +508,27 @@ export async function listOpenLoupeFindings(
       (a.line ?? 0) - (b.line ?? 0) ||
       a.reviewer.localeCompare(b.reviewer),
   );
+}
+
+/** List unresolved findings across configured reviewers, including findings
+ * retained by incremental reviews from an earlier head. */
+export function listOpenLoupeFindings(
+  octokit: Octokit,
+  ref: PullRef,
+  _headSha: string,
+  reviewers?: ReadonlySet<string>,
+): Promise<OpenLoupeFinding[]> {
+  return listLoupeFindingsByResolution(octokit, ref, false, reviewers);
+}
+
+/** List findings whose thread a human has RESOLVED — i.e. dismissed as not-a-bug
+ * or already fixed. These are the signal for not re-raising the same finding. */
+export function listResolvedLoupeFindings(
+  octokit: Octokit,
+  ref: PullRef,
+  reviewers?: ReadonlySet<string>,
+): Promise<OpenLoupeFinding[]> {
+  return listLoupeFindingsByResolution(octokit, ref, true, reviewers);
 }
 
 const RESOLVE_THREAD_MUTATION = `
@@ -652,6 +689,9 @@ export type ReviewDiagnostics = {
   readonly profileDropped: number;
   /** Inline findings the verification pass judged not real. */
   readonly verifyDropped: number;
+  /** Inline findings suppressed because a human already resolved the same
+   * finding on this PR — loupe does not re-raise what someone dismissed/fixed. */
+  readonly dismissedDropped: number;
   /** Inline findings suppressed as duplicates of a finding another reviewer owns. */
   readonly crossReviewerDropped: number;
   /** Off-diff notes actually published under "Other notes". */
@@ -689,7 +729,7 @@ function renderDiagnostics(d: ReviewDiagnostics): string {
     }`,
     `- verification: ${d.verify}`,
     `- scope: ${d.incremental}${d.incremental === "unknown" ? " (history lookup failed; prior comments kept)" : ""}`,
-    `- dropped: ${d.malformedDropped.findings} malformed finding(s), ${d.malformedDropped.concerns} malformed concern(s), ${d.outOfScopeDropped} out of scope, ${d.profileDropped} below profile, ${d.verifyDropped} rejected by verification, ${d.cappedDropped} demoted by the comment cap, ${d.crossReviewerDropped} duplicate of another reviewer`,
+    `- dropped: ${d.malformedDropped.findings} malformed finding(s), ${d.malformedDropped.concerns} malformed concern(s), ${d.outOfScopeDropped} out of scope, ${d.profileDropped} below profile, ${d.verifyDropped} rejected by verification, ${d.dismissedDropped} already resolved by a human, ${d.cappedDropped} demoted by the comment cap, ${d.crossReviewerDropped} duplicate of another reviewer`,
     `- off-diff notes published: ${d.offDiff}${
       d.salvagedFindings > 0
         ? ` (${d.salvagedFindings} salvaged from malformed finding(s))`
