@@ -73,7 +73,13 @@ const RATE_LIMIT_RETRIES = 2;
 /** Base backoff, doubled each attempt. Overridable via LOUPE_RATE_LIMIT_BASE_MS. */
 const RATE_LIMIT_BASE_MS = 2000;
 
-const TYPE_CHECK_TIMEOUT_MS = 180_000;
+/** Hard cap on the opt-in verifyCommand. Overridable via
+ * LOUPE_TYPE_CHECK_TIMEOUT_MS; default 3 minutes — enough for a warm
+ * incremental build, raise it for a repo whose cold type-check runs longer. */
+const TYPE_CHECK_TIMEOUT_MS = (() => {
+  const raw = Number(process.env["LOUPE_TYPE_CHECK_TIMEOUT_MS"]);
+  return Number.isFinite(raw) && raw > 0 ? raw : 180_000;
+})();
 const TYPE_CHECK_MAX_CHARS = 8_000;
 type TypeCheckResult = {
   readonly report?: string;
