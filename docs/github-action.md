@@ -101,6 +101,10 @@ is read only from the base-controlled action input / `LOUPE_VERIFY_COMMAND`,
 never from a PR's `.loupe.json` (which is attacker-controlled on forks and
 would otherwise be remote code execution in the runner).
 
+The command is capped at 3 minutes by default. A large monorepo whose cold
+type-check runs longer needs `LOUPE_TYPE_CHECK_TIMEOUT_MS` raised (ms), or the
+command is killed and the review proceeds without type-check context.
+
 ## Env vars
 
 The entrypoint reads only these (parsed in `packages/action/src/config.ts`):
