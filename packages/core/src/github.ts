@@ -689,6 +689,9 @@ export type ReviewDiagnostics = {
   readonly profileDropped: number;
   /** Inline findings the verification pass judged not real. */
   readonly verifyDropped: number;
+  /** Present when the opt-in type-check command ran and its output was attached
+   * to the review as ground truth. */
+  readonly typeCheck?: "ran";
   /** Inline findings suppressed because a human already resolved the same
    * finding on this PR — loupe does not re-raise what someone dismissed/fixed. */
   readonly dismissedDropped: number;
@@ -727,7 +730,7 @@ function renderDiagnostics(d: ReviewDiagnostics): string {
     `- review: ${
       d.mode === "fallback" ? "headless fallback (agentic run failed)" : d.mode
     }`,
-    `- verification: ${d.verify}`,
+    `- verification: ${d.verify}${d.typeCheck === "ran" ? " (+ type-check ground truth)" : ""}`,
     `- scope: ${d.incremental}${d.incremental === "unknown" ? " (history lookup failed; prior comments kept)" : ""}`,
     `- dropped: ${d.malformedDropped.findings} malformed finding(s), ${d.malformedDropped.concerns} malformed concern(s), ${d.outOfScopeDropped} out of scope, ${d.profileDropped} below profile, ${d.verifyDropped} rejected by verification, ${d.dismissedDropped} already resolved by a human, ${d.cappedDropped} demoted by the comment cap, ${d.crossReviewerDropped} duplicate of another reviewer`,
     `- off-diff notes published: ${d.offDiff}${

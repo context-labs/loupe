@@ -176,6 +176,7 @@ export async function runReviews(
     verify: config.verify,
     whipConfig: config.whipConfig,
     maxTurns: config.maxTurns,
+    verifyCommand: config.verifyCommand,
     maxComments: config.maxComments,
     full,
   };

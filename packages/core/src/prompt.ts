@@ -303,6 +303,12 @@ export type UserPromptInput = {
    * callers instead of locating them.
    */
   readonly callSites?: string;
+  /**
+   * Opt-in: diagnostics from the project's own type-check command, run in the
+   * checkout, filtered to the changed files. Injected as ground truth so the
+   * model confirms type-dependent findings against the real compiler.
+   */
+  readonly typeCheckReport?: string;
 };
 
 /** The per-PR user message: environment, metadata, per-path notes, and either
@@ -335,6 +341,9 @@ export function buildUserPrompt(input: UserPromptInput): string {
         `The complete unified diff is written to \`${input.diffPath}\`. For each file you review, read its hunks from that file (e.g. with grep/sed by the \`### <path>\` header) and inspect the surrounding code in the checkout. Read only what the change touches — do not read the whole diff up front.`,
       ].join("\n\n")
     : ["Diff under review:", renderDiff(input.files)].join("\n\n");
+  const typeCheckNote = input.typeCheckReport?.trim()
+    ? `Type-checker output for this checkout — GROUND TRUTH (the project's own type-check command ran here). Treat it as authoritative: do NOT raise a type error it does not report, and an error it reports on a changed file that you would otherwise miss IS a finding:\n\n${input.typeCheckReport.trim()}`
+    : "";
   return [
     environmentLine(input.timezone),
     cwdNote,
@@ -343,6 +352,7 @@ export function buildUserPrompt(input: UserPromptInput): string {
     pathNotes,
     focusNote,
     callSitesNote,
+    typeCheckNote,
     diffSection,
   ]
     .filter(Boolean)

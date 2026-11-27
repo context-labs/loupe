@@ -63,6 +63,7 @@ const envSchema = z.object({
   LOUPE_SKILLS: z.string().default(""),
   LOUPE_TIMEZONE: optionalInput,
   LOUPE_MAX_TURNS: optionalInput,
+  LOUPE_VERIFY_COMMAND: optionalInput,
   LOUPE_MAX_COMMENTS: optionalInput,
   LOUPE_PRIOR_COMMENTS: optionalInput,
   LOUPE_CROSS_REVIEWER_DEDUP: z
@@ -145,6 +146,8 @@ export type Config = {
   readonly timezone: string;
   readonly whipConfig?: WhipConfig;
   readonly maxTurns?: number;
+  /** Opt-in type-check command, env-only (see build note). */
+  readonly verifyCommand?: string;
   readonly maxComments?: number;
   /** Explicit input/file value only; core defaults to "resolve". */
   readonly priorComments?: PriorComments;
@@ -211,6 +214,10 @@ export function loadConfig(
       .filter(Boolean),
     timezone: env.LOUPE_TIMEZONE ?? file.timezone ?? "UTC",
     maxTurns: asMaxTurns(env.LOUPE_MAX_TURNS) ?? file.maxTurns,
+    // Env-only by design: verifyCommand executes a shell command in the runner,
+    // and `file` is the PR-head .loupe.json (attacker-controlled on forks). It
+    // must come from the base-controlled workflow env, never from head config.
+    verifyCommand: env.LOUPE_VERIFY_COMMAND,
     maxComments: asMaxComments(env.LOUPE_MAX_COMMENTS) ?? file.maxComments,
     priorComments:
       asPriorComments(env.LOUPE_PRIOR_COMMENTS) ?? file.priorComments,

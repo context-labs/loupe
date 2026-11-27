@@ -83,11 +83,23 @@ and only works on same-repo branches, not forks.
 
 `harness`, `model`, `reasoning`, `profile`, `verify`, `full`, `prompt-file`,
 `config`, `reviewer`, `dir`, `convention-paths`, `credential-providers`,
-`ensemble`, `skills`, `timezone`, `max-turns`, `max-comments`, `cross-reviewer-dedup` (default `true`), `prompt-cache` (default
+`ensemble`, `skills`, `timezone`, `max-turns`, `verify-command`, `max-comments`, `cross-reviewer-dedup` (default `true`), `prompt-cache` (default
 `true`), `prior-comments` (default
 `resolve`), `github-token`. Each maps to a `LOUPE_*` env var (see below);
 config/prompt paths resolve against `GITHUB_WORKSPACE` (the checkout), not the
 action's own directory.
+
+### Type-check ground truth (`verify-command`)
+
+Opt-in. Set `verify-command` to your project's type-check (e.g. `bunx tsc
+--noEmit`) and loupe runs it once in the checkout before an agentic review,
+attaching the diagnostics for the changed files as ground truth — the model is
+told not to raise a type error the compiler doesn't report, and to treat a
+reported error it missed as a finding. Your workflow must install the repo's
+deps first (loupe does not), or the command skips silently. **Security:** this
+is read only from the base-controlled action input / `LOUPE_VERIFY_COMMAND`,
+never from a PR's `.loupe.json` (which is attacker-controlled on forks and
+would otherwise be remote code execution in the runner).
 
 ## Env vars
 

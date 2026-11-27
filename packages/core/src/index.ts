@@ -6,6 +6,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 
@@ -71,6 +72,64 @@ import { validateFindings } from "./validate";
 const RATE_LIMIT_RETRIES = 2;
 /** Base backoff, doubled each attempt. Overridable via LOUPE_RATE_LIMIT_BASE_MS. */
 const RATE_LIMIT_BASE_MS = 2000;
+
+const TYPE_CHECK_TIMEOUT_MS = 180_000;
+const TYPE_CHECK_MAX_CHARS = 8_000;
+type TypeCheckResult = {
+  readonly report?: string;
+  readonly status: "ran" | "skipped";
+};
+const typeCheckCache = new Map<string, Promise<TypeCheckResult>>();
+
+/**
+ * Run the opt-in verifyCommand once per checkout (memoized across reviewers in
+ * the run) and return its diagnostics, filtered to the changed files and capped.
+ * The command is base-workflow-controlled (never from PR-head config), so shell
+ * execution is in-trust. Best-effort: a failed spawn skips the context rather
+ * than failing the review.
+ */
+export function runTypeCheck(
+  cwd: string,
+  cmd: string,
+  changedPaths: readonly string[],
+  logger: Logger,
+): Promise<TypeCheckResult> {
+  const key = `${cwd}\0${cmd}`;
+  const cached = typeCheckCache.get(key);
+  if (cached) return cached;
+  const pending = (async (): Promise<TypeCheckResult> => {
+    const res = spawnSync(cmd, {
+      cwd,
+      shell: true,
+      encoding: "utf8",
+      timeout: TYPE_CHECK_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (res.error) {
+      logger.warn("verifyCommand did not run; skipping type-check context", {
+        error: res.error.message,
+        cmd,
+      });
+      return { status: "skipped" };
+    }
+    const out = `${res.stdout ?? ""}\n${res.stderr ?? ""}`;
+    const relevant = out
+      .split("\n")
+      .filter((l) => changedPaths.some((p) => l.includes(p)));
+    const report =
+      relevant.length > 0
+        ? relevant.join("\n").slice(0, TYPE_CHECK_MAX_CHARS)
+        : "The type-check command reported no diagnostics on the changed files.";
+    logger.info("Type-check context attached", {
+      cmd,
+      exit: res.status,
+      diagnostics: relevant.length,
+    });
+    return { report, status: "ran" };
+  })();
+  typeCheckCache.set(key, pending);
+  return pending;
+}
 
 /** Parse a "retry after N" / "Retry-After: N" (seconds) hint from a provider
  * error message, in ms, if present. */
@@ -169,6 +228,14 @@ export type ReviewRequest = {
    * Omitted: the harness's own default applies and no note is added.
    */
   readonly reasoning?: ReasoningEffort;
+  /**
+   * Opt-in: a shell command (e.g. `bunx tsc --noEmit`) run once in the checkout
+   * before an agentic review, whose output is injected as ground truth so the
+   * model can confirm/refute type-dependent findings against the real compiler.
+   * MUST originate from the base-controlled workflow env, never from PR-head
+   * config — it executes in the runner. Unset = no type-check context.
+   */
+  readonly verifyCommand?: string;
   /** Custom reviewer guidance replacing the default; contract is still appended. */
   readonly guidance?: string;
   /** Named reviewer profile; labels the posted review (e.g. "migrations"). */
@@ -861,6 +928,17 @@ export async function produceReview(
       exports: changed.map((c) => c.name),
     });
   }
+  // Opt-in: run the project's own type-check in the checkout and attach its
+  // diagnostics as ground truth. Memoized so N reviewers share one run.
+  const typeCheck: TypeCheckResult =
+    treeMode && req.verifyCommand
+      ? await runTypeCheck(
+          harnessCwd,
+          req.verifyCommand,
+          scopedFiles.map((f) => f.path.slice(prefix.length)),
+          logger,
+        )
+      : { status: "skipped" };
   const commonPrompt = {
     title: pull.title,
     description: pull.description,
@@ -875,6 +953,7 @@ export async function produceReview(
         diffPath,
         cwdSubdir: subdir && harnessCwd === scoped ? subdir : undefined,
         callSites,
+        typeCheckReport: typeCheck.report,
         focusPaths: files.length < scopedFiles.length ? [...focus] : undefined,
       })
     : headlessUserPrompt;
@@ -1120,6 +1199,7 @@ export async function produceReview(
     profileDropped: counts.profileDropped,
     verifyDropped,
     dismissedDropped: 0, // set at publish time by applyDismissals
+    ...(typeCheck.status === "ran" ? { typeCheck: "ran" as const } : {}),
     crossReviewerDropped: 0,
     offDiff: dropped.length,
     cappedDropped: 0,
