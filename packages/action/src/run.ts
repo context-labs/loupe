@@ -53,6 +53,7 @@ export type RunInput = {
   readonly timezone?: string;
   readonly whipConfig?: WhipConfig;
   readonly maxTurns?: number;
+  readonly verifyCommand?: string;
   readonly maxComments?: number;
   readonly priorComments?: PriorComments;
   readonly procedure?: boolean;
@@ -124,6 +125,7 @@ async function buildRequest(input: RunInput): Promise<ReviewRequest> {
     skills: input.skills,
     timezone: input.timezone,
     maxTurns: input.maxTurns,
+    verifyCommand: input.verifyCommand,
     maxComments: input.maxComments,
     priorComments: input.priorComments,
     procedure: input.procedure,

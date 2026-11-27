@@ -72,7 +72,11 @@ inputs:
     required: false
     default: ""
   max-turns:
-    description: "Cap on the agentic tool loop. Overrides .loupe.json; default 10."
+    description: "Cap on the agentic tool loop. Overrides .loupe.json; default 20."
+    required: false
+    default: ""
+  verify-command:
+    description: "Opt-in: a shell command (e.g. 'bunx tsc --noEmit') run once in the checkout before an agentic review; its diagnostics are attached as ground truth so the model confirms type-dependent findings against the real compiler. Requires your workflow to install the repo's deps first. SECURITY: honored only from this input (base-controlled), never from a PR's .loupe.json."
     required: false
     default: ""
   max-comments:
@@ -125,6 +129,7 @@ runs:
         LOUPE_SKILLS: ${{ inputs.skills }}
         LOUPE_TIMEZONE: ${{ inputs.timezone }}
         LOUPE_MAX_TURNS: ${{ inputs.max-turns }}
+        LOUPE_VERIFY_COMMAND: ${{ inputs.verify-command }}
         LOUPE_MAX_COMMENTS: ${{ inputs.max-comments }}
         LOUPE_PRIOR_COMMENTS: ${{ inputs.prior-comments }}
         LOUPE_CROSS_REVIEWER_DEDUP: ${{ inputs.cross-reviewer-dedup }}
